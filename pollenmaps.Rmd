@@ -39,6 +39,18 @@ library(ggthemes)
 library(htmlwidgets)
 library(sf)
 
+library(lintr) # code linting
+library(cowplot) # stack ggplots
+library(viridis)
+library(readr)
+library(magrittr)
+library(purrr)
+library(stringr)
+library(tidyr)
+library(conflicted)
+
+select <- dplyr::select
+
 # remotes::install_version("caTools", version = "1.14")
 
 ```
@@ -116,7 +128,7 @@ leaflet_map
 
 
 ```{r }
-theme_map <- function(...) {
+my_maptheme <- function(...) {
   theme_minimal() +
   theme(
     text = element_text(family = "Ubuntu Regular",
@@ -173,7 +185,7 @@ lowerRight <- c(40, 17.5)
 map <- openmap(upperLeft, lowerRight, type = "stamen-terrain") # osm and other map providers available
 map_proj <- openproj(map) # The raster map is in a mercator projection and must be transformed
 raster_map <- autoplot(map_proj) +
-  theme_map() +
+  my_maptheme          () +
   geom_polygon(data = poly_fort_mer, 
                aes(x = long, y = lat, group = group, fill = layer), 
                alpha = 0.5, 
@@ -210,7 +222,7 @@ alpha_low <- min(0.02/(lowerRight_zoom[2] - upperLeft_zoom[2]), 0.005)
 alpha_high <- min(0.4/(lowerRight_zoom[2] - upperLeft_zoom[2]), 0.5)
 
 gg_map <- autoplot(map_proj_zoom) +
-  theme_map() +
+  my_maptheme          () +
   geom_point(aes(x = x, y = y, col = layer, alpha = layer), stroke = 1, shape = 15, size = 3.3, data = layer_latlong_zoom) +
   scale_alpha_continuous(range = c(alpha_low, alpha_high)) +
   scale_color_gradientn("Poac", colours = rev(heat.colors(200))) +
@@ -236,7 +248,7 @@ long_zoom <- c(0, 10)
 ggmap_heat <- get_map(c(lon = centroid[2], lat = centroid[1]), zoom = 6, maptype = "terrain", color = "color", scale = "auto") %>% 
   ggmap() +
   geom_sf(aes(fill = layer, alpha = layer), data = layer_poly_sf, inherit.aes = FALSE, lwd = 0) +
-  theme_map() +
+  my_maptheme          () +
   theme(panel.grid.major = element_line(color = "white")) +
   scale_fill_gradientn("Grass\nPollen", colors = rev(heat.colors(200))) +
   scale_alpha_continuous(range = c(0.1, 0.9)) +
@@ -261,7 +273,7 @@ long_zoom <- c(0, 10)
 ggmap_viridis <- get_map(c(lon = centroid[2], lat = centroid[1]), zoom = 6, maptype = "terrain", color = "color", scale = "auto") %>% 
   ggmap() +
   geom_sf(aes(fill = layer, alpha = layer), data = layer_poly_sf, inherit.aes = FALSE, lwd = 0) +
-  theme_map() +
+  my_maptheme          () +
   theme(panel.grid.major = element_line(color = "white")) +
   scale_fill_viridis_c("Grass\nPollen") +
   scale_alpha_continuous(range = c(0.1, 0.9)) +
@@ -278,13 +290,6 @@ https://timogrossenbacher.ch/2019/04/bivariate-maps-with-ggplot2-and-sf/ Timo ha
 Swisstopo has some great (free) map material for Switzerland which we will use here.
 
 ```{r }
-
-library(lintr) # code linting
-library(cowplot) # stack ggplots
-library(viridis)
-library(readr)
-library(magrittr)
-library(purrr)
 
 # read cantonal borders
 canton_geo <- read_sf(paste0(path_in, "g2k15.shp"))
@@ -312,7 +317,12 @@ rm(country_geo)
 ```
 
 ```{r }
-data <- read_csv("input/data.csv")
+
+data <- data.table::fread(paste0(path_in, "mod_pollen.csv")) %>%
+  slice(1) %>%
+  pivot_longer(ch0001:ch6810, names_to = "bfs_id", values_to = "mean") %>%
+  select(bfs_id, mean) %>%
+  mutate(bfs_id = as.integer(str_replace_all(bfs_id, "ch", "")))
 
 municipality_prod_geo %<>%
   left_join(data, by = c("BFS_ID" = "bfs_id"))
@@ -328,11 +338,10 @@ quantiles <- municipality_prod_geo %>%
 
 # here we create custom labels
 labels <- imap_chr(quantiles, function(., idx){
-  return(paste0(round(quantiles[idx] / 1000, 0),
-                             "k",
+  return(paste0(round(quantiles[idx], 0),
                              " – ",
-                             round(quantiles[idx + 1] / 1000, 0),
-                             "k"))
+                             round(quantiles[idx + 1], 0),
+                             " m^-3"))
 })
 
 # we need to remove the last label 
@@ -381,10 +390,10 @@ map_timo <- ggplot(
   ) +
   # use the Viridis color scale
   scale_fill_viridis(
-    option = "magma",
-    name = "Average\nincome in CHF",
+    option = "viridis",
+    name = "Poaceae",
     alpha = 0.8, # make fill a bit brighter
-    begin = 0.1, # this option seems to be new (compared to 2016):
+    begin = 0.3, # this option seems to be new (compared to 2016):
     # with this we can truncate the
     # color scale, so that extreme colors (very dark and very bright) are not
     # used, which makes the map a bit more aesthetic
@@ -412,11 +421,12 @@ map_timo <- ggplot(
   # add titles
   labs(x = NULL,
          y = NULL,
-         title = "Switzerland's regional income",
-         subtitle = "Average yearly income in Swiss municipalities, 2015") +
+         title = "Grass Pollen in Switzerland",
+         subtitle = "Hourly Average Concentration on the 1st of July 2020 at Midnight") +
   # add theme
-  theme_map()
+  my_maptheme()
+  map_timo
 
-map_timo
+# ggsave("grasspollen.png")
 
 ```
