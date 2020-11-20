@@ -5,29 +5,23 @@ date: "November 9, 2020"
 output: html_document
 ---
 
+# This is a Title
+
 This vignette shows some examples how to plot pretty maps in R with the latest packages.
 In order to run the vignette on Tsa please `load module udunits` `module load gdal`, for the sf-package and `load module netcdf` for the ncdf4-package.
 If the chunks are run outside of Rstudio in the terminal, then also install and load module pandoc.
 
-User Inputs:
-
-```{r}
-# setwd("~/RProjects/pollenmaps")
-path_in <- paste0(here::here(), "/input/")
-path_out <- paste0(here::here(), "/output/")
-nc_path <- "/users/paa/6_project/27_alnu_betu_kenda_tests/3_analysis_for_ESA/2_eps_quantile_differences/pollen_Q50_2020052006_0000.nc"
-
-```
-
 ```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = FALSE,
+  warning = FALSE,
+  message = FALSE,
+  fig.height = 10,
+  fig.width = 16,
+  fig.retina = 3
+)
 
-knitr::opts_chunk$set(echo = FALSE,
-                      warning = FALSE, 
-                      message=FALSE,
-                      fig.height=10, 
-                      fig.width=16, 
-                      fig.retina=3)
-
+library(here)
 library(ncdf4)
 library(dplyr)
 library(broom)
@@ -38,9 +32,8 @@ library(ggplot2)
 library(ggthemes)
 library(htmlwidgets)
 library(sf)
-
-library(lintr) # code linting
-library(cowplot) # stack ggplots
+library(lintr)
+library(cowplot)
 library(viridis)
 library(readr)
 library(magrittr)
@@ -48,207 +41,246 @@ library(purrr)
 library(stringr)
 library(tidyr)
 library(conflicted)
+library(ggmap)
+# library(rmapshaper)
+library(mapview)
+library(rgdal)
 
-select <- dplyr::select
+conflict_prefer("filter", "dplyr")
+conflict_prefer("select", "dplyr")
+```
 
-# remotes::install_version("caTools", version = "1.14")
 
+```{r}
+path_in <- paste0(here(), "/input/")
+path_out <- paste0(here(), "/output/")
+nc_path <- paste0("/users/paa/6_project/27_alnu_betu_kenda_tests/",
+  "3_analysis_for_ESA/2_eps_quantile_differences/pollen_Q50_2020052006_0000.nc")
 ```
 
 
 ```{r data}
 con <- nc_open(nc_path)
-# Print general info of file content
-# summary(con)
-# names(con$dim)
-# names(con$var)
-
-# get POAC
 layer <- ncvar_get(con, "POAC")
 x <- ncvar_get(con, "lon_1")
 y <- ncvar_get(con, "lat_1")
-
 nc_close(con)
 
-r <- raster(layer, ymn = 42.67, ymx = 49.52, xmn = 0.16, xmx = 16.75, crs = "+proj=longlat")
+r <- raster(layer,
+  ymn = 42.67, ymx = 49.52,
+  xmn = 0.16, xmx = 16.75, crs = "+proj=longlat"
+)
 
-layer_latlong <- tibble(x = c(x),
-                       y = c(y),
-                       layer = c(layer)) %>%
-  mutate(x = if_else(x > 180, x - 360, x)) # if lons.dom refers to COSMO-1, lons range from 0 to 360 but lons west of 0 deg. need to be negative. hence make them negative here
-
-#### GRID COSMO-1E ####
-# This would load the Cosmo 1 Grid
-# grid_c1e_path <- "/users/paa/11_resources/HSURF_RLON_RLAT_c1e.txt"
-# gridboxes_lon <- 1170
-# gridboxes_lat <- 786
-# x <- scan(grid_c1e_path, skip = 919632,  n = gridboxes_lon * gridboxes_lat)
-# y <- scan(grid_c1e_path, skip = 1839253, n = gridboxes_lon * gridboxes_lat)
-
+layer_latlong <- tibble(
+  x = c(x),
+  y = c(y),
+  layer = c(layer)
+) %>%
+  # lons west of 0 deg. need to be negative, hence make them negative here
+  mutate(x = if_else(x > 180, x - 360, x))
 ```
 
 ```{r wrangling}
+# Convert the banana-shape into an equally spaced grid
+layer_raster <- rasterize(cbind(c(x), c(y)),
+  r, layer_latlong$layer,
+  fun = mean
+)
+# Plots can become heavy - adjust second agrument accordingly
+layer_raster_coarse <- aggregate(layer_raster, 25)
+# Polygons are usually faster to plot than raster images
+layer_poly <- rasterToPolygons(layer_raster_coarse)
 
-layer_raster <- rasterize(cbind(c(x), c(y)), r, layer_latlong$layer, fun = mean) # Convert the banana-shape into an equally spaced grid
-layer_raster_coarse <- raster::aggregate(layer_raster, 25) # This is necessary otherwise the plots become way too heavy - adjust second agrument accordingly
-layer_poly <- rasterToPolygons(layer_raster_coarse) # Polygons are usually faster to plot than raster images and avoid dependency on libpng
-# layer_poly_coarse <- rmapshaper::ms_simplify(layer_poly) # Requires R-4.0.0
+# This is the oldschool way before sf was developped
+layer_poly@data$id <- seq_len(nrow(layer_poly@data))
+poly_fort <- tidy(layer_poly, data = layer_poly@data)
+# join data
+poly_fort_mer <- merge(poly_fort, layer_poly@data,
+  by.x = "id", by.y = "id"
+)
 
-# These three lines prepare data for ggplot - workaround to avoid using the sf-package and its dependencies
-# This works well with the opendata approach below and autoplot but takes a long time
-layer_poly@data$id <- 1:nrow(layer_poly@data)
-poly_fort <- broom::tidy(layer_poly, data = layer_poly@data)
-poly_fort_mer <- merge(poly_fort, layer_poly@data, by.x = 'id', by.y = 'id')  # join data
-
-# This is very efficient and works well with ggmap
+# This is the modern way and works well with ggmap
 layer_poly_sf <- st_as_sf(layer_poly)
-
 ```
 
-```{r leaflet, eval = FALSE}
-
+```{r leaflet, eval = TRUE}
 pal <- colorNumeric("YlOrRd", layer_latlong$layer)
+mymap <- "https://stamen-tiles-{s}.a.ssl.fastly.net/terrain/{z}/{x}/{y}{r}.png"
 
 leaflet_map <- leaflet(layer_poly) %>%
-  addTiles(urlTemplate = 'https://stamen-tiles-{s}.a.ssl.fastly.net/terrain/{z}/{x}/{y}{r}.png') %>% # Check this for all background maps: https://leaflet-extras.github.io/leaflet-providers/preview/
-  fitBounds(lat1 = 42.60, lat2 = 49.60, lng1 = 0.10, lng2 = 16.80) %>% # Cosmo 1E Domain with extended boundaries
-  addPolygons(weight = 0, popup = as.character(round(values(layer_raster_coarse), 2)), smoothFactor = 0.5, fillColor = ~pal(layer), fillOpacity = 0.8) %>%
-  # addRasterImage(layer_raster_coarse, opacity = 0.6) # Missing Libraries on Tsa - Reinstall packages with latest libpng module loaded
-  # addCircles(lng = ~lon, lat = ~lat, col = ~layer, weight = 0, radius = 600, opacity = 0.3) # The circles approach crashes Rstudio - too many circles!
-  # %>%
-  addLegend(pal = pal, values = ~layer_latlong$layer, title = "Poaceae")
+  # More maps here: https://leaflet-extras.github.io/leaflet-providers/preview/
+  addTiles(urlTemplate = mymap) %>%
+  # Cosmo 1E Domain with extended boundaries
+  fitBounds(lat1 = 42.60, lat2 = 49.60, lng1 = 0.10, lng2 = 16.80) %>%
+  addPolygons(
+    weight = 0,
+    popup = as.character(round(values(layer_raster_coarse), 2)),
+    smoothFactor = 0.5, fillColor = ~ pal(layer), fillOpacity = 0.8
+  ) %>%
+  addLegend(pal = pal, values = ~ layer_latlong$layer, title = "Poaceae")
 
 leaflet_map
-
-# saveWidget(leaflet_map, paste0(path_out, "leaflet_map.html"), selfcontained = TRUE)
-# This requires pandoc to be loaded on tsa - 1: module load EasyBuild-custom/cscs 2: eb Pandoc-2.10.eb –r 3: module load pandoc/2.10
-# mapview::mapshot(leaflet_map, file = "/users/sadamov/map_leaflet.png") # Create png snapshot of map, requires R-3.6.0
-
 ```
 
+```{r eval = FALSE, include = FALSE}
+saveWidget(leaflet_map,
+  paste0(path_out, "leaflet_map.html"),
+  selfcontained = TRUE
+)
+mapshot(leaflet_map, file = "/users/sadamov/map_leaflet.png")
+```
 
 ```{r }
 my_maptheme <- function(...) {
   theme_minimal() +
-  theme(
-    text = element_text(family = "Ubuntu Regular",
-                        color = "#22211d"),
-    # remove all axes
-    axis.line = element_blank(),
-    axis.text.x = element_blank(),
-    axis.text.y = element_blank(),
-    axis.ticks = element_blank(),
-    # add a subtle grid
-    panel.grid.major = element_line(color = "#dbdbd9", size = 0.2),
-    panel.grid.minor = element_blank(),
-    # background colors
-    plot.background = element_rect(fill = "#f5f5f2",
-                                   color = NA),
-    panel.background = element_rect(fill = "#f5f5f2",
-                                    color = NA),
-    legend.background = element_rect(fill = "#f5f5f2",
-                                     color = NA),
-    # borders and margins
-    plot.margin = unit(c(.5, .5, .2, .5), "cm"),
-    panel.border = element_blank(),
-    panel.spacing = unit(c(-.1, 0.2, .2, 0.2), "cm"),
-    # titles
-    legend.title = element_text(size = 11),
-    legend.text = element_text(size = 9, hjust = 0,
-                               color = "#22211d"),
-    plot.title = element_text(size = 15, hjust = 0.5,
-                              color = "#22211d"),
-    plot.subtitle = element_text(size = 10, hjust = 0.5,
-                                 color = "#22211d",
-                                 margin = margin(b = -0.1,
-                                                 t = -0.1,
-                                                 l = 2,
-                                                 unit = "cm"),
-                                 debug = F),
-    # captions
-    plot.caption = element_text(size = 7,
-                                hjust = .5,
-                                margin = margin(t = 0.2,
-                                                b = 0,
-                                                unit = "cm"),
-                                color = "#939184"),
-    ...
-  )
+    theme(
+      text = element_text(
+        family = "Ubuntu Regular",
+        color = "#22211d"
+      ),
+      # remove all axes
+      axis.line = element_blank(),
+      axis.text.x = element_blank(),
+      axis.text.y = element_blank(),
+      axis.ticks = element_blank(),
+      # add a subtle grid
+      panel.grid.major = element_line(color = "#dbdbd9", size = 0.2),
+      panel.grid.minor = element_blank(),
+      # background colors
+      plot.background = element_rect(
+        fill = "#f5f5f2",
+        color = NA
+      ),
+      panel.background = element_rect(
+        fill = "#f5f5f2",
+        color = NA
+      ),
+      legend.background = element_rect(
+        fill = "#f5f5f2",
+        color = NA
+      ),
+      # borders and margins
+      plot.margin = unit(c(.5, .5, .2, .5), "cm"),
+      panel.border = element_blank(),
+      panel.spacing = unit(c(-.1, 0.2, .2, 0.2), "cm"),
+      # titles
+      legend.title = element_text(size = 11),
+      legend.text = element_text(
+        size = 9, hjust = 0,
+        color = "#22211d"
+      ),
+      plot.title = element_text(
+        size = 15, hjust = 0.5,
+        color = "#22211d"
+      ),
+      plot.subtitle = element_text(
+        size = 10, hjust = 0.5,
+        color = "#22211d",
+        margin = margin(
+          b = -0.1,
+          t = -0.1,
+          l = 2,
+          unit = "cm"
+        ),
+        debug = F
+      ),
+      # captions
+      plot.caption = element_text(
+        size = 7,
+        hjust = .5,
+        margin = margin(
+          t = 0.2,
+          b = 0,
+          unit = "cm"
+        ),
+        color = "#939184"
+      ),
+      ...
+    )
 }
 ```
 
 
 ```{r efficient}
-
-upperLeft  <- c(51, 0)
-lowerRight <- c(40, 17.5)
-map <- openmap(upperLeft, lowerRight, type = "stamen-terrain") # osm and other map providers available
-map_proj <- openproj(map) # The raster map is in a mercator projection and must be transformed
+upper_left <- c(51, 0)
+lower_right <- c(40, 17.5)
+# osm and other map providers available
+map <- openmap(upper_left, lower_right, type = "stamen-terrain")
+# The raster map is in a mercator projection and must be transformed
+map_proj <- openproj(map)
 raster_map <- autoplot(map_proj) +
-  my_maptheme          () +
-  geom_polygon(data = poly_fort_mer, 
-               aes(x = long, y = lat, group = group, fill = layer), 
-               alpha = 0.5, 
-               size = 0) +
+  my_maptheme() +
+  geom_polygon(
+    data = poly_fort_mer,
+    aes(x = long, y = lat, group = group, fill = layer),
+    alpha = 0.5,
+    size = 0
+  ) +
   scale_fill_gradientn("Poac", colours = rev(heat.colors(200)))
 
 raster_map
-# ggsave(paste0(path_out, "raster_map.png"), raster_map, dpi = "retina") # Change resolution here
-
 ```
 
-
+```{r }
+# Change resolution here
+ggsave(paste0(path_out, "raster_map.png"),
+  raster_map,
+  dpi = "retina"
+)
+```
 ```{r}
+# Full Domain is c(51, 0), c(41, 18)
+# Switzerland is c(48, 6), c(45.5, 10)
 
-# # Full Domain
-# upperLeft_zoom  <- c(51, 0)
-# lowerRight_zoom <- c(41, 18)
+# Zoom
+upper_left_zoom  <- c(47.5, 8)
+lower_right_zoom <- c(46, 10.5)
 
-# Switzerland
-upperLeft_zoom  <- c(48, 6)
-lowerRight_zoom <- c(45.5, 10)
-
-# # Zoom
-# upperLeft_zoom  <- c(47.5, 8)
-# lowerRight_zoom <- c(46, 10.5)
-map_zoom <- openmap(upperLeft_zoom, lowerRight_zoom, type = "stamen-terrain") # osm and other map providers available
-map_proj_zoom <- openproj(map_zoom) # The raster map is in a mercator projection and must be transformed
-
+map_zoom <- openmap(upper_left_zoom, lower_right_zoom, type = "stamen-terrain")
+map_proj_zoom <- openproj(map_zoom)
 layer_latlong_zoom <- layer_latlong %>%
-  filter(between(x, upperLeft_zoom[2], lowerRight_zoom[2]),
-         between(y, lowerRight_zoom[1], upperLeft_zoom[1]))
+  filter(
+    between(x, upper_left_zoom[2], lower_right_zoom[2]),
+    between(y, lower_right_zoom[1], upper_left_zoom[1])
+  )
 
-alpha_low <- min(0.02/(lowerRight_zoom[2] - upperLeft_zoom[2]), 0.005)
-alpha_high <- min(0.4/(lowerRight_zoom[2] - upperLeft_zoom[2]), 0.5)
+alpha_low <- min(0.02 / (lower_right_zoom[2] - upper_left_zoom[2]), 0.005)
+alpha_high <- min(0.4 / (lower_right_zoom[2] - upper_left_zoom[2]), 0.5)
 
 gg_map <- autoplot(map_proj_zoom) +
-  my_maptheme          () +
-  geom_point(aes(x = x, y = y, col = layer, alpha = layer), stroke = 1, shape = 15, size = 3.3, data = layer_latlong_zoom) +
+  my_maptheme() +
+  geom_point(aes(x = x, y = y, col = layer, alpha = layer),
+    stroke = 1, shape = 15, size = 3.3, data = layer_latlong_zoom
+  ) +
   scale_alpha_continuous(range = c(alpha_low, alpha_high)) +
   scale_color_gradientn("Poac", colours = rev(heat.colors(200))) +
   guides(alpha = "none")
 
 gg_map
-# ggsave(paste0(path_out, "gg_map.png"), gg_map, dpi = "retina") # Change resolution here
 ```
 
+```{r eval = FALSE, include = FALSE}
+ggsave(paste0(path_out, "gg_map.png"), gg_map, dpi = "retina")
+```
 
 The next example requires a Google account to retrieve data from the Google API. This package is quite powerful and requires very little pre
 
 ```{r ggmap, eval = TRUE}
 # ?register_google
-library(ggmap) # This package is more powerful but requires a Google account to query the Google API
 register_google(key = "AIzaSyC-8Tyjbj1zc5fKdKZdbWaJk1H8CXdUIB8")
 
-centroid  <- c(45, 8)
-# Zoom
-lat_zoom  <- c(44, 48)
+centroid <- c(45, 8)
+lat_zoom <- c(44, 48)
 long_zoom <- c(0, 10)
 
-ggmap_heat <- get_map(c(lon = centroid[2], lat = centroid[1]), zoom = 6, maptype = "terrain", color = "color", scale = "auto") %>% 
+ggmap_heat <- get_map(c(lon = centroid[2], lat = centroid[1]),
+  zoom = 6, maptype = "terrain", color = "color", scale = "auto"
+) %>%
   ggmap() +
-  geom_sf(aes(fill = layer, alpha = layer), data = layer_poly_sf, inherit.aes = FALSE, lwd = 0) +
-  my_maptheme          () +
+  geom_sf(aes(fill = layer, alpha = layer),
+    data = layer_poly_sf, inherit.aes = FALSE, lwd = 0
+  ) +
+  my_maptheme() +
   theme(panel.grid.major = element_line(color = "white")) +
   scale_fill_gradientn("Grass\nPollen", colors = rev(heat.colors(200))) +
   scale_alpha_continuous(range = c(0.1, 0.9)) +
@@ -257,23 +289,28 @@ ggmap_heat <- get_map(c(lon = centroid[2], lat = centroid[1]), zoom = 6, maptype
   guides(alpha = "none")
 
 ggmap_heat
+```
 
-# ggsave(paste0(path_out, "ggmap_heat.png"), ggmap_heat, dpi = "retina") # Change resolution here
-
+```{r eval = FALSE, include = FALSE}
+ggsave(paste0(path_out, "ggmap_heat.png"), ggmap_heat, dpi = "retina")
 ```
 
 Changing the color gradient is easy. https://www.datanovia.com/en/blog/top-r-color-palettes-to-know-for-great-data-visualization/
 
 ```{r}
-centroid  <- c(45, 8)
+centroid <- c(45, 8)
 # Zoom
-lat_zoom  <- c(44, 48)
+lat_zoom <- c(44, 48)
 long_zoom <- c(0, 10)
 
-ggmap_viridis <- get_map(c(lon = centroid[2], lat = centroid[1]), zoom = 6, maptype = "terrain", color = "color", scale = "auto") %>% 
+ggmap_viridis <- get_map(c(lon = centroid[2], lat = centroid[1]),
+  zoom = 6, maptype = "terrain", color = "color", scale = "auto"
+) %>%
   ggmap() +
-  geom_sf(aes(fill = layer, alpha = layer), data = layer_poly_sf, inherit.aes = FALSE, lwd = 0) +
-  my_maptheme          () +
+  geom_sf(aes(fill = layer, alpha = layer),
+    data = layer_poly_sf, inherit.aes = FALSE, lwd = 0
+  ) +
+  my_maptheme() +
   theme(panel.grid.major = element_line(color = "white")) +
   scale_fill_viridis_c("Grass\nPollen") +
   scale_alpha_continuous(range = c(0.1, 0.9)) +
@@ -282,24 +319,22 @@ ggmap_viridis <- get_map(c(lon = centroid[2], lat = centroid[1]), zoom = 6, mapt
   guides(alpha = "none")
 
 ggmap_viridis
+```
 
-# ggsave(paste0(path_out, "ggmap_viridis.png"), ggmap_viridis, dpi = "retina") # Change resolution here
+```{r eval = FALSE, include = FALSE}
+ggsave(paste0(path_out, "ggmap_viridis.png"), ggmap_viridis, dpi = "retina")
 ```
 
 https://timogrossenbacher.ch/2019/04/bivariate-maps-with-ggplot2-and-sf/ Timo has a great blog about plotting maps in CH. The following open source shapefiles and code chunks are directly from his git repo here: https://github.com/grssnbchr/bivariate-maps-ggplot2-sf
 Swisstopo has some great (free) map material for Switzerland which we will use here.
 
 ```{r }
-
 # read cantonal borders
 canton_geo <- read_sf(paste0(path_in, "g2k15.shp"))
-
 # read country borders - masking with read_sf didn't work
-country_geo <- rgdal::readOGR(paste0(path_in, "g2l15.shp"))
-
+country_geo <- readOGR(paste0(path_in, "g2l15.shp"))
 # read lakes
 lake_geo <- read_sf(paste0(path_in, "g2s15.shp"))
-
 # read productive area (2324 municipalities)
 municipality_prod_geo <- read_sf(paste0(path_in, "gde-1-1-15.shp"))
 
@@ -313,11 +348,10 @@ relief <- raster(paste0(path_in, "02-relief-ascii.asc")) %>%
 
 # clean up
 rm(country_geo)
-
 ```
 
 ```{r }
-
+# Varnames from FieldExtra can be very long -> data.table
 data <- data.table::fread(paste0(path_in, "mod_pollen.csv")) %>%
   slice(1) %>%
   pivot_longer(ch0001:ch6810, names_to = "bfs_id", values_to = "mean") %>%
@@ -337,30 +371,30 @@ quantiles <- municipality_prod_geo %>%
   as.vector() # to remove names of quantiles, so idx below is numeric
 
 # here we create custom labels
-labels <- imap_chr(quantiles, function(., idx){
-  return(paste0(round(quantiles[idx], 0),
-                             " – ",
-                             round(quantiles[idx + 1], 0),
-                             " m^-3"))
+labels <- imap_chr(quantiles, function(., idx) {
+  return(paste0(
+    round(quantiles[idx], 0),
+    " - ",
+    round(quantiles[idx + 1], 0),
+    " m^-3"
+  ))
 })
 
-# we need to remove the last label 
-# because that would be something like "478k - NA"
-labels <- labels[1:length(labels) - 1]
+# we need to remove the last label
+# because that would be something like "- NA"
+labels <- labels[seq_len(length(labels)) - 1]
 
-# here we actually create a new 
+# here we actually create a new
 # variable on the dataset with the quantiles
 municipality_prod_geo %<>%
   mutate(mean_quantiles = cut(mean,
-                               breaks = quantiles,
-                               labels = labels,
-                               include.lowest = T))
-
-
+    breaks = quantiles,
+    labels = labels,
+    include.lowest = T
+  ))
 ```
 
 ```{r }
-
 map_timo <- ggplot(
   # define main data source
   data = municipality_prod_geo
@@ -376,15 +410,17 @@ map_timo <- ggplot(
     )
   ) +
   # use the "alpha hack" (as the "fill" aesthetic is already taken)
-  scale_alpha(name = "",
-              range = c(0.6, 0),
-              guide = F) + # suppress legend
+  scale_alpha(
+    name = "",
+    range = c(0.6, 0),
+    guide = F
+  ) + # suppress legend
   # add main fill aesthetic
   # use thin white stroke for municipality borders
   geom_sf(
     mapping = aes(
       fill = mean_quantiles
-      ),
+    ),
     color = "white",
     size = 0.1
   ) +
@@ -401,10 +437,11 @@ map_timo <- ggplot(
     discrete = T, # discrete classes, thus guide_legend instead of _colorbar
     direction = 1, # dark is lowest, yellow is highest
     guide = guide_legend(
-     keyheight = unit(5, units = "mm"),
-     title.position = "top",
-     reverse = T # display highest income on top
-  )) +
+      keyheight = unit(5, units = "mm"),
+      title.position = "top",
+      reverse = T # display highest income on top
+    )
+  ) +
   # use thicker white stroke for cantonal borders
   geom_sf(
     data = canton_geo,
@@ -419,14 +456,41 @@ map_timo <- ggplot(
     color = "transparent"
   ) +
   # add titles
-  labs(x = NULL,
-         y = NULL,
-         title = "Grass Pollen in Switzerland",
-         subtitle = "Hourly Average Concentration on the 1st of July 2020 at Midnight") +
+  labs(
+    x = NULL,
+    y = NULL,
+    title = "Grass Pollen in Switzerland",
+    subtitle = "Hourly Average Concentration on
+      the 1st of July 2020 at Midnight"
+  ) +
   # add theme
   my_maptheme()
-  map_timo
+map_timo
+```
 
-# ggsave("grasspollen.png")
+```{r eval = FALSE, include = FALSE}
+ggsave(paste0(path_out, "map_timo.png"), map_timo, dpi = "retina")
+```
 
+```{r }
+pal <- colorNumeric("YlOrRd", layer_latlong$layer)
+
+leaflet_map_muni <- leaflet(municipality_prod_geo %>%
+  select(mean) %>%
+  st_transform(crs = "+proj=longlat +datum=WGS84")) %>%
+  # ms_simplify()) %>%
+  addTiles(urlTemplate = mymap) %>%
+  # Cosmo 1E Domain with extended boundaries
+  fitBounds(lat1 = 45, lat2 = 48, lng1 = 6, lng2 = 11) %>%
+  addPolygons(
+    weight = 0, smoothFactor = 0.5,
+    fillColor = ~ pal(layer), fillOpacity = 0.8
+  )
+
+leaflet_map_muni
+```
+
+```{r eval = FALSE, include = FALSE}
+saveWidget(leaflet_map_muni,
+  paste0(path_out, "leaflet_map_muni.html"), selfcontained = TRUE)
 ```
