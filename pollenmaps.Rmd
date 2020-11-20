@@ -1,17 +1,21 @@
 ---
 title: "Plotting Maps in R"
 author: "Simon Adamov"
-date: "November 9, 2020"
+date: "November 20, 2020"
 output: html_document
 ---
 
-# This is a Title
+This vignette shows some examples on how to plot pretty maps in R with the latest packages.
+Currently, it functions as a loose collection of open-source and third-party map material combined with various raster and shapefiles. 
+I would already like to mention that the most beautiful map was completely taken from here: https://timogrossenbacher.ch/2019/04/bivariate-maps-with-ggplot2-and-sf/
+Generally, all code chunks in this vignette need to run in tsa with the current R-version 3.5.2 (2020-11-20).
 
-This vignette shows some examples how to plot pretty maps in R with the latest packages.
-In order to run the vignette on Tsa please `load module udunits` `module load gdal`, for the sf-package and `load module netcdf` for the ncdf4-package.
-If the chunks are run outside of Rstudio in the terminal, then also install and load module pandoc.
+*Quick Note about the setup:
+I access Tsa@CSCS via VSCode and remote-ssh. Then I run an interactive R sessions while working in the vignette. This required quite a few steps to set it up properly. 
+I plan to write a wiki page about vscode-R @ cscs at some point in the future. Feel free to ask me anything in the meantime.*
+In the chunk below I load a whole lot of packages, if the reader is only interested in a portion of the plot, feel free to only load a selection of packages as well.
 
-```{r setup, include=FALSE}
+```{r setup, include=FALSE, echo = FALSE}
 knitr::opts_chunk$set(
   echo = FALSE,
   warning = FALSE,
@@ -42,7 +46,7 @@ library(stringr)
 library(tidyr)
 library(conflicted)
 library(ggmap)
-# library(rmapshaper)
+# library(rmapshaper) this currently fails due to missing v8 library and some dependencies on tsa (ticket at cscs)
 library(mapview)
 library(rgdal)
 
@@ -50,6 +54,10 @@ conflict_prefer("filter", "dplyr")
 conflict_prefer("select", "dplyr")
 ```
 
+## Data Import
+
+A typical output format in weather and climate science are netcdf files, hence we import one of this type right here, showing the median pollen concentrations modeled by Cosmo-1E.
+The code can of course be adjusted to plot any netcdf file.
 
 ```{r}
 path_in <- paste0(here(), "/input/")
@@ -58,8 +66,11 @@ nc_path <- paste0("/users/paa/6_project/27_alnu_betu_kenda_tests/",
   "3_analysis_for_ESA/2_eps_quantile_differences/pollen_Q50_2020052006_0000.nc")
 ```
 
+Different packages will require different formats. The most recent development when it comes to polygon data in R is the package sf, a highly flexible framework not yet supported by all other packages.
+Hence we prepare the data in different shapes and forms. The output of many weather models is a gridded field. First, we display such grids. In a second step we extract data from model output for specific locations 
+(Swiss municipalities) to create even nicer plots specifically for the Swiss Domain.
 
-```{r data}
+```{r data, echo = TRUE}
 con <- nc_open(nc_path)
 layer <- ncvar_get(con, "POAC")
 x <- ncvar_get(con, "lon_1")
@@ -80,7 +91,7 @@ layer_latlong <- tibble(
   mutate(x = if_else(x > 180, x - 360, x))
 ```
 
-```{r wrangling}
+```{r wrangling, echo = TRUE}
 # Convert the banana-shape into an equally spaced grid
 layer_raster <- rasterize(cbind(c(x), c(y)),
   r, layer_latlong$layer,
@@ -103,32 +114,9 @@ poly_fort_mer <- merge(poly_fort, layer_poly@data,
 layer_poly_sf <- st_as_sf(layer_poly)
 ```
 
-```{r leaflet, eval = TRUE}
-pal <- colorNumeric("YlOrRd", layer_latlong$layer)
-mymap <- "https://stamen-tiles-{s}.a.ssl.fastly.net/terrain/{z}/{x}/{y}{r}.png"
+## Grid Plots - netCDF
 
-leaflet_map <- leaflet(layer_poly) %>%
-  # More maps here: https://leaflet-extras.github.io/leaflet-providers/preview/
-  addTiles(urlTemplate = mymap) %>%
-  # Cosmo 1E Domain with extended boundaries
-  fitBounds(lat1 = 42.60, lat2 = 49.60, lng1 = 0.10, lng2 = 16.80) %>%
-  addPolygons(
-    weight = 0,
-    popup = as.character(round(values(layer_raster_coarse), 2)),
-    smoothFactor = 0.5, fillColor = ~ pal(layer), fillOpacity = 0.8
-  ) %>%
-  addLegend(pal = pal, values = ~ layer_latlong$layer, title = "Poaceae")
-
-leaflet_map
-```
-
-```{r eval = FALSE, include = FALSE}
-saveWidget(leaflet_map,
-  paste0(path_out, "leaflet_map.html"),
-  selfcontained = TRUE
-)
-mapshot(leaflet_map, file = "/users/sadamov/map_leaflet.png")
-```
+We first define a general map-them (from Timo Grossenbacher) to obtain a similar look and feel for all plots:
 
 ```{r }
 my_maptheme <- function(...) {
@@ -200,8 +188,43 @@ my_maptheme <- function(...) {
 }
 ```
 
+### Interactive
 
-```{r efficient}
+The following creates an interactive map (html widget) where the background can be chosen from a large variety of map providers.
+If the polygon layer is fine or dense, plotting can take a long time or even crash. It's usually better to first aggregate the polygons.
+
+```{r leaflet, echo = TRUE}
+pal <- colorNumeric("YlOrRd", layer_latlong$layer)
+mymap <- "https://stamen-tiles-{s}.a.ssl.fastly.net/terrain/{z}/{x}/{y}{r}.png"
+
+leaflet_map <- leaflet(layer_poly) %>%
+  # More maps here: https://leaflet-extras.github.io/leaflet-providers/preview/
+  addTiles(urlTemplate = mymap) %>%
+  # Cosmo 1E Domain with extended boundaries
+  fitBounds(lat1 = 42.60, lat2 = 49.60, lng1 = 0.10, lng2 = 16.80) %>%
+  addPolygons(
+    weight = 0,
+    popup = as.character(round(values(layer_raster_coarse), 2)),
+    smoothFactor = 0.5, fillColor = ~ pal(layer), fillOpacity = 0.8
+  ) %>%
+  addLegend(pal = pal, values = ~ layer_latlong$layer, title = "Poaceae")
+
+leaflet_map
+```
+
+```{r eval = FALSE, include = FALSE}
+saveWidget(leaflet_map,
+  paste0(path_out, "leaflet_map.html"),
+  selfcontained = TRUE
+)
+mapshot(leaflet_map, file = "/users/sadamov/map_leaflet.png")
+```
+
+### Static - Open-Source
+
+The following plots are fully open source.
+
+```{r efficient, echo = TRUE}
 upper_left <- c(51, 0)
 lower_right <- c(40, 17.5)
 # osm and other map providers available
@@ -228,6 +251,7 @@ ggsave(paste0(path_out, "raster_map.png"),
   dpi = "retina"
 )
 ```
+
 ```{r}
 # Full Domain is c(51, 0), c(41, 18)
 # Switzerland is c(48, 6), c(45.5, 10)
@@ -263,9 +287,11 @@ gg_map
 ggsave(paste0(path_out, "gg_map.png"), gg_map, dpi = "retina")
 ```
 
-The next example requires a Google account to retrieve data from the Google API. This package is quite powerful and requires very little pre
+### Static - Google-API
 
-```{r ggmap, eval = TRUE}
+The next example requires a Google account to retrieve data from the Google API. This package is quite powerful and works well with the modern sf datatype.
+
+```{r ggmap, echo = TRUE}
 # ?register_google
 register_google(key = "AIzaSyC-8Tyjbj1zc5fKdKZdbWaJk1H8CXdUIB8")
 
@@ -325,10 +351,12 @@ ggmap_viridis
 ggsave(paste0(path_out, "ggmap_viridis.png"), ggmap_viridis, dpi = "retina")
 ```
 
+## Plots for Swiss Municipalities
+
 https://timogrossenbacher.ch/2019/04/bivariate-maps-with-ggplot2-and-sf/ Timo has a great blog about plotting maps in CH. The following open source shapefiles and code chunks are directly from his git repo here: https://github.com/grssnbchr/bivariate-maps-ggplot2-sf
 Swisstopo has some great (free) map material for Switzerland which we will use here.
 
-```{r }
+```{r echo = TRUE}
 # read cantonal borders
 canton_geo <- read_sf(paste0(path_in, "g2k15.shp"))
 # read country borders - masking with read_sf didn't work
@@ -349,6 +377,9 @@ relief <- raster(paste0(path_in, "02-relief-ascii.asc")) %>%
 # clean up
 rm(country_geo)
 ```
+
+The mod_pollen data in this case was retrieved using fieldextra (MCH-Software). Which allows to extract modeled concentrations at any coordinate in the model domain.
+The postprocessing of the fieldextra output is not yet streamlined. This could still be developed at some point.
 
 ```{r }
 # Varnames from FieldExtra can be very long -> data.table
@@ -394,7 +425,7 @@ municipality_prod_geo %<>%
   ))
 ```
 
-```{r }
+```{r echo = TRUE}
 map_timo <- ggplot(
   # define main data source
   data = municipality_prod_geo
@@ -472,7 +503,9 @@ map_timo
 ggsave(paste0(path_out, "map_timo.png"), map_timo, dpi = "retina")
 ```
 
-```{r }
+And to conclude an interactive map with municipality level data. Right now the resulting plot is too heavy to be displayed and the aggregation of sf objects requires a library that I did not manage to install on tsa. 
+
+```{r eval = FALSE}
 pal <- colorNumeric("YlOrRd", layer_latlong$layer)
 
 leaflet_map_muni <- leaflet(municipality_prod_geo %>%
