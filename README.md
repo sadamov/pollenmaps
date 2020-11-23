@@ -9,7 +9,7 @@ Generally, all code chunks in this vignette need to run in tsa with the current 
 I access Tsa@CSCS via VSCode and remote-ssh. Then I run an interactive R sessions while working in the vignette. This required quite a few steps to set it up properly. 
 I plan to write a wiki page about vscode-R @ cscs at some point in the future. Feel free to ask me anything in the meantime.
 
-The following system libraries (modules on tsa) were installed and loaded (via Spack or Easybuild) as some R-packages depend on them:
+The following system libraries (modules on tsa) were installed and loaded in my session (via Spack or Easybuild) as some R-packages depend on them:
 <pre>
  1) slurm/20.02.5                    19) r/3.5.2-foss-2019b                
  2) bzip2/.1.0.8                     20) pandoc/2.10                       
@@ -38,10 +38,9 @@ The analysis is conducted in the file called pollenmaps.Rmd an R-Markdown vignet
 ## Input
 Historically, netCDF files and arrays with latlong information are widely used in atmospheric science, hence these types shall function as input files.
 
-- *c1e_pollen_muni.csv* is a cosmo-1E model output with hourly grass pollen concentrations retrieved at the geo-location of all Swiss municipalities at 2020-07-01 00h. 
-The coordinates of all Municipalities were retrieved using the google Geocoding API and stored and my location list (happy to share it).
-- *c1e_pollen_grid.csv* is a cosmo-1E model output with daily pollen concentrations retrieved for all grid-boxes in the Cosmo-1E Domain at 2020-07-01 00h.
+- *c1e_pollen_muni.csv* is a cosmo-1E model output with hourly grass pollen concentrations retrieved at the geo-location of all Swiss municipalities at 2020-07-01 00h. The coordinates of all Municipalities were retrieved using the google Geocoding API and stored and my location list (happy to share it). Then Fieldextra retrieves the requested variable, in my case grass pollen (Poaceae), as defined in the *pollen.nl* namelist.
 - The remaining shapefiles were pulled from https://timogrossenbacher.ch/2019/04/bivariate-maps-with-ggplot2-and-sf/ and represent a variety of maps for Switzerland.
+- In the vignette the path to a netCDF-file is defined: Currently this points to a cosmo-1E model output with daily pollen concentrations retrieved for all grid-boxes in the Cosmo-1E Domain at 2020-07-01 00h.
 
 ## Output
 To output all or a selection of the plots in the main vignette, the user can either execute individual code chunks or *knit* the whole vignette to create an html file.
