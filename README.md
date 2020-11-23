@@ -31,8 +31,8 @@ The following system libraries (modules on tsa) were installed and loaded in my 
 18) PrgEnv-gnu/19.2-nocuda          
 </pre>
   
-The project uses renv to install and load all R-packages required for this analysis - feel free to `renv::load(). 
-The main vignette loads a broad selection of R-packages, feel free to only load a subselection of them when executing individual code chunks.
+The project uses renv to install and load all R-packages required for this analysis - feel free to `renv::restore(). 
+This will load a broad selection of R-packages, feel free to only load a subselection of them when executing individual code chunks.
 The analysis is conducted in the file called pollenmaps.Rmd an R-Markdown vignette: https://bookdown.org/yihui/rmarkdown/r-package-vignette.html
 
 ## Input
