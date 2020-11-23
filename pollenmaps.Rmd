@@ -46,7 +46,7 @@ library(stringr)
 library(tidyr)
 library(conflicted)
 library(ggmap)
-# library(rmapshaper) this currently fails due to missing v8 library and some dependencies on tsa (ticket at cscs)
+# library(rmapshaper) this currently fails due to missing v8 library
 library(mapview)
 library(rgdal)
 
@@ -62,8 +62,7 @@ The code can of course be adjusted to plot any netcdf file.
 ```{r}
 path_in <- paste0(here(), "/input/")
 path_out <- paste0(here(), "/output/")
-nc_path <- paste0("/users/paa/6_project/27_alnu_betu_kenda_tests/",
-  "3_analysis_for_ESA/2_eps_quantile_differences/pollen_Q50_2020052006_0000.nc")
+nc_path <- paste0("/scratch/sadamov/COSMO-1/c1_pollen_grid.nc")
 ```
 
 Different packages will require different formats. The most recent development when it comes to polygon data in R is the package sf, a highly flexible framework not yet supported by all other packages.
@@ -72,7 +71,7 @@ Hence we prepare the data in different shapes and forms. The output of many weat
 
 ```{r data, echo = TRUE}
 con <- nc_open(nc_path)
-layer <- ncvar_get(con, "POAC")
+layer <- ncvar_get(con, "POAC")[, , 80]
 x <- ncvar_get(con, "lon_1")
 y <- ncvar_get(con, "lat_1")
 nc_close(con)
@@ -98,9 +97,11 @@ layer_raster <- rasterize(cbind(c(x), c(y)),
   fun = mean
 )
 # Plots can become heavy - adjust second agrument accordingly
-layer_raster_coarse <- aggregate(layer_raster, 25)
+layer_raster_vcoarse <- aggregate(layer_raster, 20)
+layer_raster_coarse <- aggregate(layer_raster, 6)
 # Polygons are usually faster to plot than raster images
 layer_poly <- rasterToPolygons(layer_raster_coarse)
+layer_poly_leaflet <- rasterToPolygons(layer_raster_vcoarse)
 
 # This is the oldschool way before sf was developped
 layer_poly@data$id <- seq_len(nrow(layer_poly@data))
@@ -123,7 +124,7 @@ my_maptheme <- function(...) {
   theme_minimal() +
     theme(
       text = element_text(
-        family = "Ubuntu Regular",
+        family = "Verdana",
         color = "#22211d"
       ),
       # remove all axes
@@ -193,21 +194,21 @@ my_maptheme <- function(...) {
 The following creates an interactive map (html widget) where the background can be chosen from a large variety of map providers.
 If the polygon layer is fine or dense, plotting can take a long time or even crash. It's usually better to first aggregate the polygons.
 
-```{r leaflet, echo = TRUE}
-pal <- colorNumeric("YlOrRd", layer_latlong$layer)
+```{r leaflet, echo = TRUE, fig.height = 5, fig.width = 7}
+pal <- colorNumeric("YlOrRd", layer_poly_leaflet$layer)
 mymap <- "https://stamen-tiles-{s}.a.ssl.fastly.net/terrain/{z}/{x}/{y}{r}.png"
 
-leaflet_map <- leaflet(layer_poly) %>%
+leaflet_map <- leaflet(layer_poly_leaflet) %>%
   # More maps here: https://leaflet-extras.github.io/leaflet-providers/preview/
   addTiles(urlTemplate = mymap) %>%
   # Cosmo 1E Domain with extended boundaries
   fitBounds(lat1 = 42.60, lat2 = 49.60, lng1 = 0.10, lng2 = 16.80) %>%
   addPolygons(
     weight = 0,
-    popup = as.character(round(values(layer_raster_coarse), 2)),
-    smoothFactor = 0.5, fillColor = ~ pal(layer), fillOpacity = 0.8
+    popup = as.character(round(values(layer_raster_vcoarse), 2)),
+    smoothFactor = 0.5, fillColor = ~ pal(layer), fillOpacity = 0.6
   ) %>%
-  addLegend(pal = pal, values = ~ layer_latlong$layer, title = "Poaceae")
+  addLegend(pal = pal, values = ~ layer_poly_leaflet$layer, title = "Poaceae")
 
 leaflet_map
 ```
@@ -217,7 +218,8 @@ saveWidget(leaflet_map,
   paste0(path_out, "leaflet_map.html"),
   selfcontained = TRUE
 )
-mapshot(leaflet_map, file = "/users/sadamov/map_leaflet.png")
+# This requires phantomjs for static map screenshot
+mapshot(leaflet_map, file = paste0(path_out, "map_leaflet.png"))
 ```
 
 ### Static - Open-Source
@@ -236,15 +238,22 @@ raster_map <- autoplot(map_proj) +
   geom_polygon(
     data = poly_fort_mer,
     aes(x = long, y = lat, group = group, fill = layer),
-    alpha = 0.5,
+    alpha = 0.7,
     size = 0
   ) +
-  scale_fill_gradientn("Poac", colours = rev(heat.colors(200)))
+  scale_fill_gradientn("Poaceae\n[m^-3]", colours = rev(heat.colors(200))) +
+  labs(
+    x = "Lon",
+    y = "Lat",
+    title = "Grass Pollen in Cosmo-1 Domain",
+    subtitle = "Hourly Average Concentration on the 1st of July 2020 at Midnight
+    "
+  )
 
 raster_map
 ```
 
-```{r }
+```{r eval = FALSE, include = FALSE}
 # Change resolution here
 ggsave(paste0(path_out, "raster_map.png"),
   raster_map,
@@ -268,8 +277,8 @@ layer_latlong_zoom <- layer_latlong %>%
     between(y, lower_right_zoom[1], upper_left_zoom[1])
   )
 
-alpha_low <- min(0.02 / (lower_right_zoom[2] - upper_left_zoom[2]), 0.005)
-alpha_high <- min(0.4 / (lower_right_zoom[2] - upper_left_zoom[2]), 0.5)
+alpha_low <- min(0.2 / (lower_right_zoom[2] - upper_left_zoom[2]), 0.2)
+alpha_high <- min(0.7 / (lower_right_zoom[2] - upper_left_zoom[2]), 0.7)
 
 gg_map <- autoplot(map_proj_zoom) +
   my_maptheme() +
@@ -278,7 +287,14 @@ gg_map <- autoplot(map_proj_zoom) +
   ) +
   scale_alpha_continuous(range = c(alpha_low, alpha_high)) +
   scale_color_gradientn("Poac", colours = rev(heat.colors(200))) +
-  guides(alpha = "none")
+  guides(alpha = "none") +
+  labs(
+    x = "Lon",
+    y = "Lat",
+    title = "Grass Pollen in Switzerland",
+    subtitle = "Hourly Average Concentration on the 1st of July 2020 at Midnight
+    "
+  )
 
 gg_map
 ```
@@ -293,11 +309,12 @@ The next example requires a Google account to retrieve data from the Google API.
 
 ```{r ggmap, echo = TRUE}
 # ?register_google
+# Enter your key here - I will change mine soon ;-)
 register_google(key = "AIzaSyC-8Tyjbj1zc5fKdKZdbWaJk1H8CXdUIB8")
 
 centroid <- c(45, 8)
-lat_zoom <- c(44, 48)
-long_zoom <- c(0, 10)
+lat_zoom <- c(45, 48)
+long_zoom <- c(4, 11)
 
 ggmap_heat <- get_map(c(lon = centroid[2], lat = centroid[1]),
   zoom = 6, maptype = "terrain", color = "color", scale = "auto"
@@ -312,7 +329,14 @@ ggmap_heat <- get_map(c(lon = centroid[2], lat = centroid[1]),
   scale_alpha_continuous(range = c(0.1, 0.9)) +
   scale_x_continuous(limits = long_zoom, expand = c(0, 0)) +
   scale_y_continuous(limits = lat_zoom, expand = c(0, 0)) +
-  guides(alpha = "none")
+  guides(alpha = "none") +
+  labs(
+    x = "Lon",
+    y = "Lat",
+    title = "Grass Pollen in Switzerland",
+    subtitle = "Hourly Average Concentration on the 1st of July 2020 at Midnight
+    "
+  )
 
 ggmap_heat
 ```
@@ -325,9 +349,8 @@ Changing the color gradient is easy. https://www.datanovia.com/en/blog/top-r-col
 
 ```{r}
 centroid <- c(45, 8)
-# Zoom
-lat_zoom <- c(44, 48)
-long_zoom <- c(0, 10)
+lat_zoom <- c(45, 48)
+long_zoom <- c(4, 11)
 
 ggmap_viridis <- get_map(c(lon = centroid[2], lat = centroid[1]),
   zoom = 6, maptype = "terrain", color = "color", scale = "auto"
@@ -342,7 +365,14 @@ ggmap_viridis <- get_map(c(lon = centroid[2], lat = centroid[1]),
   scale_alpha_continuous(range = c(0.1, 0.9)) +
   scale_x_continuous(limits = long_zoom, expand = c(0, 0)) +
   scale_y_continuous(limits = lat_zoom, expand = c(0, 0)) +
-  guides(alpha = "none")
+  guides(alpha = "none") +
+    labs(
+    x = "Lon",
+    y = "Lat",
+    title = "Grass Pollen in Switzerland",
+    subtitle = "Hourly Average Concentration on the 1st of July 2020 at Midnight
+    "
+  )
 
 ggmap_viridis
 ```
@@ -383,7 +413,7 @@ The postprocessing of the fieldextra output is not yet streamlined. This could s
 
 ```{r }
 # Varnames from FieldExtra can be very long -> data.table
-data <- data.table::fread(paste0(path_in, "mod_pollen.csv")) %>%
+data <- data.table::fread(paste0(path_in, "c1_pollen_muni.csv")) %>%
   slice(1) %>%
   pivot_longer(ch0001:ch6810, names_to = "bfs_id", values_to = "mean") %>%
   select(bfs_id, mean) %>%
@@ -491,8 +521,7 @@ map_timo <- ggplot(
     x = NULL,
     y = NULL,
     title = "Grass Pollen in Switzerland",
-    subtitle = "Hourly Average Concentration on
-      the 1st of July 2020 at Midnight"
+    subtitle = "Hourly Average Concentration on the 1st of July 2020 at Midnight"
   ) +
   # add theme
   my_maptheme()
@@ -511,7 +540,7 @@ pal <- colorNumeric("YlOrRd", layer_latlong$layer)
 leaflet_map_muni <- leaflet(municipality_prod_geo %>%
   select(mean) %>%
   st_transform(crs = "+proj=longlat +datum=WGS84")) %>%
-  # ms_simplify()) %>%
+  # ms_simplify()) %>% This requires the rmapshaper package depending on v8
   addTiles(urlTemplate = mymap) %>%
   # Cosmo 1E Domain with extended boundaries
   fitBounds(lat1 = 45, lat2 = 48, lng1 = 6, lng2 = 11) %>%
