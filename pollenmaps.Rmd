@@ -1,0 +1,558 @@
+---
+title: "Plotting Maps in R"
+author: "Simon Adamov"
+date: "November 20, 2020"
+output: html_document
+---
+
+This vignette shows some examples on how to plot pretty maps in R with the latest packages.
+Currently, it functions as a loose collection of open-source and third-party map material combined with various raster and shapefiles. 
+I would already like to mention that the most beautiful map was completely taken from here: https://timogrossenbacher.ch/2019/04/bivariate-maps-with-ggplot2-and-sf/
+Generally, all code chunks in this vignette need to run in tsa with the current R-version 3.5.2 (2020-11-20).
+
+*Quick Note about the setup:
+I access Tsa@CSCS via VSCode and remote-ssh. Then I run an interactive R sessions while working in the vignette. This required quite a few steps to set it up properly. 
+I plan to write a wiki page about vscode-R @ cscs at some point in the future. Feel free to ask me anything in the meantime.*
+In the chunk below I load a whole lot of packages, if the reader is only interested in a portion of the plot, feel free to only load a selection of packages as well.
+
+```{r setup, include=FALSE, echo = FALSE}
+knitr::opts_chunk$set(
+  echo = FALSE,
+  warning = FALSE,
+  message = FALSE,
+  fig.height = 10,
+  fig.width = 16,
+  fig.retina = 3
+)
+
+library(here)
+library(ncdf4)
+library(dplyr)
+library(broom)
+library(leaflet)
+library(raster)
+library(OpenStreetMap)
+library(ggplot2)
+library(ggthemes)
+library(htmlwidgets)
+library(sf)
+library(lintr)
+library(cowplot)
+library(viridis)
+library(readr)
+library(magrittr)
+library(purrr)
+library(stringr)
+library(tidyr)
+library(conflicted)
+library(ggmap)
+# library(rmapshaper) this currently fails due to missing v8 library
+library(mapview)
+library(rgdal)
+
+conflict_prefer("filter", "dplyr")
+conflict_prefer("select", "dplyr")
+```
+
+## Data Import
+
+A typical output format in weather and climate science are netcdf files, hence we import one of this type right here, showing the median pollen concentrations modeled by Cosmo-1E.
+The code can of course be adjusted to plot any netcdf file.
+
+```{r}
+path_in <- paste0(here(), "/input/")
+path_out <- paste0(here(), "/output/")
+nc_path <- paste0("/scratch/sadamov/COSMO-1/c1_pollen_grid.nc")
+```
+
+Different packages will require different formats. The most recent development when it comes to polygon data in R is the package sf, a highly flexible framework not yet supported by all other packages.
+Hence we prepare the data in different shapes and forms. The output of many weather models is a gridded field. First, we display such grids. In a second step we extract data from model output for specific locations 
+(Swiss municipalities) to create even nicer plots specifically for the Swiss Domain.
+
+```{r data, echo = TRUE}
+con <- nc_open(nc_path)
+layer <- ncvar_get(con, "POAC")[, , 80]
+x <- ncvar_get(con, "lon_1")
+y <- ncvar_get(con, "lat_1")
+nc_close(con)
+
+r <- raster(layer,
+  ymn = 42.67, ymx = 49.52,
+  xmn = 0.16, xmx = 16.75, crs = "+proj=longlat"
+)
+
+layer_latlong <- tibble(
+  x = c(x),
+  y = c(y),
+  layer = c(layer)
+) %>%
+  # lons west of 0 deg. need to be negative, hence make them negative here
+  mutate(x = if_else(x > 180, x - 360, x))
+```
+
+```{r wrangling, echo = TRUE}
+# Convert the banana-shape into an equally spaced grid
+layer_raster <- rasterize(cbind(c(x), c(y)),
+  r, layer_latlong$layer,
+  fun = mean
+)
+# Plots can become heavy - adjust second agrument accordingly
+layer_raster_vcoarse <- aggregate(layer_raster, 20)
+layer_raster_coarse <- aggregate(layer_raster, 6)
+# Polygons are usually faster to plot than raster images
+layer_poly <- rasterToPolygons(layer_raster_coarse)
+layer_poly_leaflet <- rasterToPolygons(layer_raster_vcoarse)
+
+# This is the oldschool way before sf was developped
+layer_poly@data$id <- seq_len(nrow(layer_poly@data))
+poly_fort <- tidy(layer_poly, data = layer_poly@data)
+# join data
+poly_fort_mer <- merge(poly_fort, layer_poly@data,
+  by.x = "id", by.y = "id"
+)
+
+# This is the modern way and works well with ggmap
+layer_poly_sf <- st_as_sf(layer_poly)
+```
+
+## Grid Plots - netCDF
+
+We first define a general map-them (from Timo Grossenbacher) to obtain a similar look and feel for all plots:
+
+```{r }
+my_maptheme <- function(...) {
+  theme_minimal() +
+    theme(
+      text = element_text(
+        family = "Verdana",
+        color = "#22211d"
+      ),
+      # remove all axes
+      axis.line = element_blank(),
+      axis.text.x = element_blank(),
+      axis.text.y = element_blank(),
+      axis.ticks = element_blank(),
+      # add a subtle grid
+      panel.grid.major = element_line(color = "#dbdbd9", size = 0.2),
+      panel.grid.minor = element_blank(),
+      # background colors
+      plot.background = element_rect(
+        fill = "#f5f5f2",
+        color = NA
+      ),
+      panel.background = element_rect(
+        fill = "#f5f5f2",
+        color = NA
+      ),
+      legend.background = element_rect(
+        fill = "#f5f5f2",
+        color = NA
+      ),
+      # borders and margins
+      plot.margin = unit(c(.5, .5, .2, .5), "cm"),
+      panel.border = element_blank(),
+      panel.spacing = unit(c(-.1, 0.2, .2, 0.2), "cm"),
+      # titles
+      legend.title = element_text(size = 11),
+      legend.text = element_text(
+        size = 9, hjust = 0,
+        color = "#22211d"
+      ),
+      plot.title = element_text(
+        size = 15, hjust = 0.5,
+        color = "#22211d"
+      ),
+      plot.subtitle = element_text(
+        size = 10, hjust = 0.5,
+        color = "#22211d",
+        margin = margin(
+          b = -0.1,
+          t = -0.1,
+          l = 2,
+          unit = "cm"
+        ),
+        debug = F
+      ),
+      # captions
+      plot.caption = element_text(
+        size = 7,
+        hjust = .5,
+        margin = margin(
+          t = 0.2,
+          b = 0,
+          unit = "cm"
+        ),
+        color = "#939184"
+      ),
+      ...
+    )
+}
+```
+
+### Interactive
+
+The following creates an interactive map (html widget) where the background can be chosen from a large variety of map providers.
+If the polygon layer is fine or dense, plotting can take a long time or even crash. It's usually better to first aggregate the polygons.
+
+```{r leaflet, echo = TRUE, fig.height = 5, fig.width = 7}
+pal <- colorNumeric("YlOrRd", layer_poly_leaflet$layer)
+mymap <- "https://stamen-tiles-{s}.a.ssl.fastly.net/terrain/{z}/{x}/{y}{r}.png"
+
+leaflet_map <- leaflet(layer_poly_leaflet) %>%
+  # More maps here: https://leaflet-extras.github.io/leaflet-providers/preview/
+  addTiles(urlTemplate = mymap) %>%
+  # Cosmo 1E Domain with extended boundaries
+  fitBounds(lat1 = 42.60, lat2 = 49.60, lng1 = 0.10, lng2 = 16.80) %>%
+  addPolygons(
+    weight = 0,
+    popup = as.character(round(values(layer_raster_vcoarse), 2)),
+    smoothFactor = 0.5, fillColor = ~ pal(layer), fillOpacity = 0.6
+  ) %>%
+  addLegend(pal = pal, values = ~ layer_poly_leaflet$layer, title = "Poaceae")
+
+leaflet_map
+```
+
+```{r eval = FALSE, include = FALSE}
+saveWidget(leaflet_map,
+  paste0(path_out, "leaflet_map.html"),
+  selfcontained = TRUE
+)
+# This requires phantomjs for static map screenshot
+mapshot(leaflet_map, file = paste0(path_out, "map_leaflet.png"))
+```
+
+### Static - Open-Source
+
+The following plots are fully open source.
+
+```{r efficient, echo = TRUE}
+upper_left <- c(51, 0)
+lower_right <- c(40, 17.5)
+# osm and other map providers available
+map <- openmap(upper_left, lower_right, type = "stamen-terrain")
+# The raster map is in a mercator projection and must be transformed
+map_proj <- openproj(map)
+raster_map <- autoplot(map_proj) +
+  my_maptheme() +
+  geom_polygon(
+    data = poly_fort_mer,
+    aes(x = long, y = lat, group = group, fill = layer),
+    alpha = 0.7,
+    size = 0
+  ) +
+  scale_fill_gradientn("Poaceae\n[m^-3]", colours = rev(heat.colors(200))) +
+  labs(
+    x = "Lon",
+    y = "Lat",
+    title = "Grass Pollen in Cosmo-1 Domain",
+    subtitle = "Hourly Average Concentration on the 1st of July 2020 at Midnight
+    "
+  )
+
+raster_map
+```
+
+```{r eval = FALSE, include = FALSE}
+# Change resolution here
+ggsave(paste0(path_out, "raster_map.png"),
+  raster_map,
+  dpi = "retina"
+)
+```
+
+```{r}
+# Full Domain is c(51, 0), c(41, 18)
+# Switzerland is c(48, 6), c(45.5, 10)
+
+# Zoom
+upper_left_zoom  <- c(47.5, 8)
+lower_right_zoom <- c(46, 10.5)
+
+map_zoom <- openmap(upper_left_zoom, lower_right_zoom, type = "stamen-terrain")
+map_proj_zoom <- openproj(map_zoom)
+layer_latlong_zoom <- layer_latlong %>%
+  filter(
+    between(x, upper_left_zoom[2], lower_right_zoom[2]),
+    between(y, lower_right_zoom[1], upper_left_zoom[1])
+  )
+
+alpha_low <- min(0.2 / (lower_right_zoom[2] - upper_left_zoom[2]), 0.2)
+alpha_high <- min(0.7 / (lower_right_zoom[2] - upper_left_zoom[2]), 0.7)
+
+gg_map <- autoplot(map_proj_zoom) +
+  my_maptheme() +
+  geom_point(aes(x = x, y = y, col = layer, alpha = layer),
+    stroke = 1, shape = 15, size = 3.3, data = layer_latlong_zoom
+  ) +
+  scale_alpha_continuous(range = c(alpha_low, alpha_high)) +
+  scale_color_gradientn("Poac", colours = rev(heat.colors(200))) +
+  guides(alpha = "none") +
+  labs(
+    x = "Lon",
+    y = "Lat",
+    title = "Grass Pollen in Switzerland",
+    subtitle = "Hourly Average Concentration on the 1st of July 2020 at Midnight
+    "
+  )
+
+gg_map
+```
+
+```{r eval = FALSE, include = FALSE}
+ggsave(paste0(path_out, "gg_map.png"), gg_map, dpi = "retina")
+```
+
+### Static - Google-API
+
+The next example requires a Google account to retrieve data from the Google API. This package is quite powerful and works well with the modern sf datatype.
+
+```{r ggmap, echo = TRUE}
+# ?register_google
+# Enter your key here - I will change mine soon ;-)
+register_google(key = "AIzaSyC-8Tyjbj1zc5fKdKZdbWaJk1H8CXdUIB8")
+
+centroid <- c(45, 8)
+lat_zoom <- c(45, 48)
+long_zoom <- c(4, 11)
+
+ggmap_heat <- get_map(c(lon = centroid[2], lat = centroid[1]),
+  zoom = 6, maptype = "terrain", color = "color", scale = "auto"
+) %>%
+  ggmap() +
+  geom_sf(aes(fill = layer, alpha = layer),
+    data = layer_poly_sf, inherit.aes = FALSE, lwd = 0
+  ) +
+  my_maptheme() +
+  theme(panel.grid.major = element_line(color = "white")) +
+  scale_fill_gradientn("Grass\nPollen", colors = rev(heat.colors(200))) +
+  scale_alpha_continuous(range = c(0.1, 0.9)) +
+  scale_x_continuous(limits = long_zoom, expand = c(0, 0)) +
+  scale_y_continuous(limits = lat_zoom, expand = c(0, 0)) +
+  guides(alpha = "none") +
+  labs(
+    x = "Lon",
+    y = "Lat",
+    title = "Grass Pollen in Switzerland",
+    subtitle = "Hourly Average Concentration on the 1st of July 2020 at Midnight
+    "
+  )
+
+ggmap_heat
+```
+
+```{r eval = FALSE, include = FALSE}
+ggsave(paste0(path_out, "ggmap_heat.png"), ggmap_heat, dpi = "retina")
+```
+
+Changing the color gradient is easy. https://www.datanovia.com/en/blog/top-r-color-palettes-to-know-for-great-data-visualization/
+
+```{r}
+centroid <- c(45, 8)
+lat_zoom <- c(45, 48)
+long_zoom <- c(4, 11)
+
+ggmap_viridis <- get_map(c(lon = centroid[2], lat = centroid[1]),
+  zoom = 6, maptype = "terrain", color = "color", scale = "auto"
+) %>%
+  ggmap() +
+  geom_sf(aes(fill = layer, alpha = layer),
+    data = layer_poly_sf, inherit.aes = FALSE, lwd = 0
+  ) +
+  my_maptheme() +
+  theme(panel.grid.major = element_line(color = "white")) +
+  scale_fill_viridis_c("Grass\nPollen") +
+  scale_alpha_continuous(range = c(0.1, 0.9)) +
+  scale_x_continuous(limits = long_zoom, expand = c(0, 0)) +
+  scale_y_continuous(limits = lat_zoom, expand = c(0, 0)) +
+  guides(alpha = "none") +
+    labs(
+    x = "Lon",
+    y = "Lat",
+    title = "Grass Pollen in Switzerland",
+    subtitle = "Hourly Average Concentration on the 1st of July 2020 at Midnight
+    "
+  )
+
+ggmap_viridis
+```
+
+```{r eval = FALSE, include = FALSE}
+ggsave(paste0(path_out, "ggmap_viridis.png"), ggmap_viridis, dpi = "retina")
+```
+
+## Plots for Swiss Municipalities
+
+https://timogrossenbacher.ch/2019/04/bivariate-maps-with-ggplot2-and-sf/ Timo has a great blog about plotting maps in CH. The following open source shapefiles and code chunks are directly from his git repo here: https://github.com/grssnbchr/bivariate-maps-ggplot2-sf
+Swisstopo has some great (free) map material for Switzerland which we will use here.
+
+```{r echo = TRUE}
+# read cantonal borders
+canton_geo <- read_sf(paste0(path_in, "g2k15.shp"))
+# read country borders - masking with read_sf didn't work
+country_geo <- readOGR(paste0(path_in, "g2l15.shp"))
+# read lakes
+lake_geo <- read_sf(paste0(path_in, "g2s15.shp"))
+# read productive area (2324 municipalities)
+municipality_prod_geo <- read_sf(paste0(path_in, "gde-1-1-15.shp"))
+
+# read in raster of relief
+relief <- raster(paste0(path_in, "02-relief-ascii.asc")) %>%
+  # hide relief outside of Switzerland by masking with country borders
+  mask(country_geo) %>%
+  as("SpatialPixelsDataFrame") %>%
+  as.data.frame() %>%
+  rename(value = `X02.relief.ascii`)
+
+# clean up
+rm(country_geo)
+```
+
+The mod_pollen data in this case was retrieved using fieldextra (MCH-Software). Which allows to extract modeled concentrations at any coordinate in the model domain.
+The postprocessing of the fieldextra output is not yet streamlined. This could still be developed at some point.
+
+```{r }
+# Varnames from FieldExtra can be very long -> data.table
+data <- data.table::fread(paste0(path_in, "c1_pollen_muni.csv")) %>%
+  slice(1) %>%
+  pivot_longer(ch0001:ch6810, names_to = "bfs_id", values_to = "mean") %>%
+  select(bfs_id, mean) %>%
+  mutate(bfs_id = as.integer(str_replace_all(bfs_id, "ch", "")))
+
+municipality_prod_geo %<>%
+  left_join(data, by = c("BFS_ID" = "bfs_id"))
+
+# define number of classes
+no_classes <- 6
+
+# extract quantiles
+quantiles <- municipality_prod_geo %>%
+  pull(mean) %>%
+  quantile(probs = seq(0, 1, length.out = no_classes + 1)) %>%
+  as.vector() # to remove names of quantiles, so idx below is numeric
+
+# here we create custom labels
+labels <- imap_chr(quantiles, function(., idx) {
+  return(paste0(
+    round(quantiles[idx], 0),
+    " - ",
+    round(quantiles[idx + 1], 0),
+    " m^-3"
+  ))
+})
+
+# we need to remove the last label
+# because that would be something like "- NA"
+labels <- labels[seq_len(length(labels)) - 1]
+
+# here we actually create a new
+# variable on the dataset with the quantiles
+municipality_prod_geo %<>%
+  mutate(mean_quantiles = cut(mean,
+    breaks = quantiles,
+    labels = labels,
+    include.lowest = T
+  ))
+```
+
+```{r echo = TRUE}
+map_timo <- ggplot(
+  # define main data source
+  data = municipality_prod_geo
+) +
+  # first: draw the relief
+  geom_raster(
+    data = relief,
+    inherit.aes = FALSE,
+    aes(
+      x = x,
+      y = y,
+      alpha = value
+    )
+  ) +
+  # use the "alpha hack" (as the "fill" aesthetic is already taken)
+  scale_alpha(
+    name = "",
+    range = c(0.6, 0),
+    guide = F
+  ) + # suppress legend
+  # add main fill aesthetic
+  # use thin white stroke for municipality borders
+  geom_sf(
+    mapping = aes(
+      fill = mean_quantiles
+    ),
+    color = "white",
+    size = 0.1
+  ) +
+  # use the Viridis color scale
+  scale_fill_viridis(
+    option = "viridis",
+    name = "Poaceae",
+    alpha = 0.8, # make fill a bit brighter
+    begin = 0.3, # this option seems to be new (compared to 2016):
+    # with this we can truncate the
+    # color scale, so that extreme colors (very dark and very bright) are not
+    # used, which makes the map a bit more aesthetic
+    end = 0.9,
+    discrete = T, # discrete classes, thus guide_legend instead of _colorbar
+    direction = 1, # dark is lowest, yellow is highest
+    guide = guide_legend(
+      keyheight = unit(5, units = "mm"),
+      title.position = "top",
+      reverse = T # display highest income on top
+    )
+  ) +
+  # use thicker white stroke for cantonal borders
+  geom_sf(
+    data = canton_geo,
+    fill = "transparent",
+    color = "white",
+    size = 0.5
+  ) +
+  # draw lakes in light blue
+  geom_sf(
+    data = lake_geo,
+    fill = "#D6F1FF",
+    color = "transparent"
+  ) +
+  # add titles
+  labs(
+    x = NULL,
+    y = NULL,
+    title = "Grass Pollen in Switzerland",
+    subtitle = "Hourly Average Concentration on the 1st of July 2020 at Midnight"
+  ) +
+  # add theme
+  my_maptheme()
+map_timo
+```
+
+```{r eval = FALSE, include = FALSE}
+ggsave(paste0(path_out, "map_timo.png"), map_timo, dpi = "retina")
+```
+
+And to conclude an interactive map with municipality level data. Right now the resulting plot is too heavy to be displayed and the aggregation of sf objects requires a library that I did not manage to install on tsa. 
+
+```{r eval = FALSE}
+pal <- colorNumeric("YlOrRd", layer_latlong$layer)
+
+leaflet_map_muni <- leaflet(municipality_prod_geo %>%
+  select(mean) %>%
+  st_transform(crs = "+proj=longlat +datum=WGS84")) %>%
+  # ms_simplify()) %>% This requires the rmapshaper package depending on v8
+  addTiles(urlTemplate = mymap) %>%
+  # Cosmo 1E Domain with extended boundaries
+  fitBounds(lat1 = 45, lat2 = 48, lng1 = 6, lng2 = 11) %>%
+  addPolygons(
+    weight = 0, smoothFactor = 0.5,
+    fillColor = ~ pal(layer), fillOpacity = 0.8
+  )
+
+leaflet_map_muni
+```
+
+```{r eval = FALSE, include = FALSE}
+saveWidget(leaflet_map_muni,
+  paste0(path_out, "leaflet_map_muni.html"), selfcontained = TRUE)
+```

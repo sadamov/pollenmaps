@@ -1,0 +1,3 @@
+fieldextra.diagnostic
+output/*
+!output/pollenmaps.html
