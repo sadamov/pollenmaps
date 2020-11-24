@@ -49,6 +49,8 @@ library(ggmap)
 # library(rmapshaper) this currently fails due to missing v8 library
 library(mapview)
 library(rgdal)
+library(jsonlite)
+library(languageserver)
 
 conflict_prefer("filter", "dplyr")
 conflict_prefer("select", "dplyr")
