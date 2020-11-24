@@ -1,8 +1,18 @@
 source("renv/activate.R")
 
 Sys.setenv(TERM_PROGRAM = "vscode")
+Sys.setenv(DOWNLOAD_STATIC_LIBV8 = 1)
 
-source(file.path(Sys.getenv(if (.Platform$OS.type == "windows") "USERPROFILE" else "HOME"), ".vscode-R", "init.R"))
+source(file.path(
+  Sys.getenv(
+    if (.Platform$OS.type == "windows") {
+      "USERPROFILE"
+    } else {
+      "HOME"
+    }
+  ),
+  ".vscode-R", "init.R"
+))
 
 options(vsc.plot = "Two")
 options(vsc.dev.args = list(width = 800, height = 600))

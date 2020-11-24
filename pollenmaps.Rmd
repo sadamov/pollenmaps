@@ -46,7 +46,7 @@ library(stringr)
 library(tidyr)
 library(conflicted)
 library(ggmap)
-# library(rmapshaper) this currently fails due to missing v8 library
+library(rmapshaper)
 library(mapview)
 library(rgdal)
 library(jsonlite)
@@ -523,7 +523,8 @@ map_timo <- ggplot(
     x = NULL,
     y = NULL,
     title = "Grass Pollen in Switzerland",
-    subtitle = "Hourly Average Concentration on the 1st of July 2020 at Midnight"
+    subtitle = paste("Hourly Average Concentration on",
+       "the 1st of July 2020 at Midnight")
   ) +
   # add theme
   my_maptheme()
@@ -534,22 +535,31 @@ map_timo
 ggsave(paste0(path_out, "map_timo.png"), map_timo, dpi = "retina")
 ```
 
-And to conclude an interactive map with municipality level data. Right now the resulting plot is too heavy to be displayed and the aggregation of sf objects requires a library that I did not manage to install on tsa. 
+And to conclude an interactive map with municipality level data.
 
-```{r eval = FALSE}
-pal <- colorNumeric("YlOrRd", layer_latlong$layer)
+```{r }
+pal <- colorNumeric("YlOrRd", municipality_prod_geo$mean)
 
 leaflet_map_muni <- leaflet(municipality_prod_geo %>%
   select(mean) %>%
   st_transform(crs = "+proj=longlat +datum=WGS84")) %>%
-  # ms_simplify()) %>% This requires the rmapshaper package depending on v8
+  # If the map is too heavy -> simplify shapes
+  # ms_simplify(keep = 0.05))  %>%
   addTiles(urlTemplate = mymap) %>%
   # Cosmo 1E Domain with extended boundaries
   fitBounds(lat1 = 45, lat2 = 48, lng1 = 6, lng2 = 11) %>%
   addPolygons(
-    weight = 0, smoothFactor = 0.5,
-    fillColor = ~ pal(layer), fillOpacity = 0.8
-  )
+    weight = 0,
+    popup = paste("<br/>",
+      paste0("<b>", municipality_prod_geo$Secondary_, "</b><br/>"),
+      paste0(as.character(round(municipality_prod_geo$mean, 0)),
+        " Pollenkörner pro m³")
+    ),
+    smoothFactor = 0.5,
+    fillColor = ~ pal(mean),
+    fillOpacity = 0.6
+  ) %>%
+  addLegend(pal = pal, values = ~ municipality_prod_geo$mean, title = "Poaceae")
 
 leaflet_map_muni
 ```
