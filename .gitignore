@@ -1,3 +1,4 @@
 fieldextra.diagnostic
 output/*
+!output/.gitignore
 %
