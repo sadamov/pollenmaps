@@ -64,7 +64,7 @@ The code can of course be adjusted to plot any netcdf file.
 ```{r}
 path_in <- paste0(here(), "/input/")
 path_out <- paste0(here(), "/output/")
-nc_path <- paste0("/scratch/sadamov/COSMO-1/c1_pollen_grid.nc")
+nc_path <- paste0("/scratch/sadamov/wd/osm/20022500_c1e_tsa_alnus_osm/lm_coarsec1_pollen_grid.nc") # This can be any netCDF file with POAC (e.g.)
 ```
 
 Different packages will require different formats. The most recent development when it comes to polygon data in R is the package sf, a highly flexible framework not yet supported by all other packages.
@@ -509,13 +509,13 @@ map_timo <- ggplot(
   geom_sf(
     data = canton_geo,
     fill = "transparent",
-    color = "white",
+    color = "#ffffff",
     size = 0.5
   ) +
   # draw lakes in light blue
   geom_sf(
     data = lake_geo,
-    fill = "#D6F1FF",
+    fill = "#e4e6db6e",
     color = "transparent"
   ) +
   # add titles

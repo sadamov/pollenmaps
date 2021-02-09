@@ -2,3 +2,5 @@ fieldextra.diagnostic
 output/*
 !output/.gitignore
 %
+pollenmaps.Rmd
+pollenmaps.html
