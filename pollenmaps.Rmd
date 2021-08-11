@@ -1,3 +1,4 @@
+
 ---
 title: "Plotting Maps in R"
 author: "Simon Adamov"
@@ -49,8 +50,9 @@ library(ggmap)
 library(rmapshaper)
 library(mapview)
 library(rgdal)
-library(jsonlite)
-library(languageserver)
+# library(languageserver)
+# library(httpgd)
+# library(jsonlite)
 
 conflict_prefer("filter", "dplyr")
 conflict_prefer("select", "dplyr")
@@ -61,10 +63,17 @@ conflict_prefer("select", "dplyr")
 A typical output format in weather and climate science are netcdf files, hence we import one of this type right here, showing the median pollen concentrations modeled by Cosmo-1E.
 The code can of course be adjusted to plot any netcdf file.
 
+```{r }
+nc_path <- "/scratch/sadamov/wd/21_alnu_tuning_v2/21022500_c1e_tsa_alnu_tuning/lm_coarse/lfff01000000"
+variable  <- "ALNU"
+  system(paste0("fxfilter --force -s ", variable, " ", nc_path, " -o ", nc_path, "_filtered"))
+  system(paste0("fxconvert --force nc ", nc_path, "_filtered -o ", nc_path, "_filtered.nc"))
+```
+
 ```{r}
 path_in <- paste0(here(), "/input/")
 path_out <- paste0(here(), "/output/")
-nc_path <- paste0("/scratch/sadamov/wd/osm/20022500_c1e_tsa_alnus_osm/lm_coarsec1_pollen_grid.nc") # This can be any netCDF file with POAC (e.g.)
+nc_path <- paste0("/scratch/sadamov/wd/osm/20022500_c1e_tsa_alnus_osm/lm_coarse/c1_pollen_grid.nc") # This can be any netCDF file with POAC (e.g.)
 ```
 
 Different packages will require different formats. The most recent development when it comes to polygon data in R is the package sf, a highly flexible framework not yet supported by all other packages.
