@@ -9,21 +9,22 @@ library(lubridate)
 
 plots <- list()
 
-model_version <- "tuning_v2"
-start_date <- date("2021-01-01")
-end_date <- date("2021-03-21")
+model_version <- "tuning_v3"
+start_date <- date("2021-01-25")
+end_date <- date("2021-03-31")
 species <- "ALNU"
-variable <- "tune"
+variable <- ""
 model_name <- if_else(str_detect(model_version, "tuning"), "tuning", "model_version")
 
 limits <- case_when(
-  species == "ALNU" ~ c(0.0799, 1.344),
-  species == "BETU" ~ c(0.140, 2.973),
-  species == "POAC" ~ c(0.105, 0.569)
+  species == "ALNU" & variable == "tune" ~ c(0.05, 1.4),
+  species == "BETU" & variable == "tune" ~ c(0.1, 3),
+  species == "POAC" & variable == "tune" ~ c(0.1, 0.6),
+  TRUE ~ c(0, 4)
 )
 while (start_date <= end_date) {
   date <- paste(c(str_sub(start_date, c(3, 6, 9), c(4, 7, 10)), "00"), collapse = "")
-  for (hour in 1:23) {
+  for (hour in c(1, 13)) {
     i <- sprintf("%02d", hour)
     nc_path <- paste0("/scratch/sadamov/wd/", substr(as.character(date), 1, 2), "_", tolower(species), "_", model_version, "/", date, "_c1e_tsa_", tolower(species), "_tuning/lm_coarse/lfff00", i, "0000") # This can be any netCDF file with POAC (e.g.)
 
@@ -47,10 +48,10 @@ while (start_date <= end_date) {
       layer <- log10(layer + 1)
     }
 
-    tb_data <- tibble(x = c(x), y = c(y), z = c(layer))
+    tb_data <- tibble(x = c(x), y = c(y), layer = c(layer))
 
     plots[[paste0(substr(as.character(date), 1, 6), as.character(i))]] <- ggplot(tb_data) +
-      geom_tile(aes(x, y, fill = z, width = 0.016, height = 0.011)) +
+      geom_tile(aes(x, y, fill = layer, width = 0.018, height = 0.011)) +
       theme_bw() +
       borders("world", xlim = range(tb_data$x), ylim = range(tb_data$y), colour = "white") +
       scale_fill_viridis_c(limits = limits, breaks = round(seq(limits[1], limits[2], (limits[2] - limits[1]) / 4), 2)) +
@@ -59,12 +60,11 @@ while (start_date <= end_date) {
       labs(fill = paste(species, variable)) +
       xlab("Longitude [East]") +
       ylab("Latitude [North]") +
-      theme(text = element_text(size = 18))
+      theme(text = element_text(size = 18)) +
+      coord_quickmap(xlim = range(tb_data$x), ylim = range(tb_data$y)) 
   }
   start_date <- start_date + days(1)
 }
-
-# ggsave("plot.png", plots[[as.character(date)]][[as.character(i)]], width = 16, height = 9)
 
 saveGIF(
   {
@@ -72,8 +72,7 @@ saveGIF(
       print(plots[[j]])
     }
   },
-  movie.name = paste0(here(), "/map_", model_version, "_", species, variable, ".gif"),
+  movie.name = paste0(here(), "/output/map_", model_version, "_", species, variable, ".gif"),
   interval = 2 / 25,
   ani.width = 1600,
-  ani.height = 900
-)
+  ani.height = 900)
