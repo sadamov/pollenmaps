@@ -38,8 +38,11 @@ This will load a broad selection of R-packages, feel free to only load a subsele
 - The R-script called *animation.R* renders a GIF animation for a whole series of NetCDF files (e.g. one Pollen-Season)
 - The R-script called *simple_map.R* returns a quick tile map based on the ggplot-package
 
-## Input
-Historically, netCDF files and arrays with lat/long information are widely used in atmospheric science, hence these types shall function as input files.
+## Data
+
+The scripts inside the  /ext-data folder will prepare the data and store them in the /data folder.
+Historically, netCDF files and arrays with lat/long information are widely used in atmospheric science,
+a path to such a file must be provided in each of the vignettes.
 
 - *c1_pollen_muni.csv* is a cosmo-1 model output with hourly grass pollen concentrations retrieved at the geo-location of all Swiss municipalities at 2020-07-01 00h. The coordinates of all Municipalities were retrieved using the google Geocoding API and stored in my location list (happy to share it). Then Fieldextra retrieves the requested variable, in my case grass pollen (Poaceae), as defined in the *pollen.nl* namelist.
 - The remaining shapefiles were pulled from https://timogrossenbacher.ch/2019/04/bivariate-maps-with-ggplot2-and-sf/ and represent a variety of opensource maps for Switzerland.
