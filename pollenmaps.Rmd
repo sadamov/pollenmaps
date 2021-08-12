@@ -70,7 +70,7 @@ in standard cartesian coordinates (already unrotated model output).
 ```{r }
 #### SPECIFY YOUR FIELD AND FILE HERE ####
 field <- "ALNU"
-path_in <- paste0(here(), "/input/")
+path_in <- paste0(here(), "/data/")
 path_out <- paste0(here(), "/output/")
 nc_path <- "/scratch/sadamov/wd/21_alnu_tuning_v3/21022500_c1e_tsa_alnu_tuning/lm_coarse/lfff01000000"
 variable  <- "ALNU"
