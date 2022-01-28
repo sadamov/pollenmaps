@@ -4,8 +4,8 @@ library(dplyr)
 library(maps)
 
 # Path to GRIB File
-grib_path <- "/scratch/sadamov/wd/21_alnu_tuning_v3/21022500_c1e_tsa_alnu_tuning/lm_coarse/lfff01000000"
-field <- "ALNU"
+grib_path <- "/scratch/sadamov/wd/20_cory_tuning_v3/20021500_c1e_tsa_cory_tuning/lm_coarse/lfff01000000"
+field <- "CORY"
 
 # Filtering the field specified above to gain speed
 system(paste0(
@@ -41,7 +41,7 @@ nc_close(con)
 tb_data <- tibble(x = c(x), y = c(y), layer = c(layer))
 
 # Create a quick plot using Tiles with approximate sizes around each coordinate-pair
-plot <- ggplot(tb_data) +
+map_output <- ggplot(tb_data) +
   geom_tile(aes(x, y, fill = layer, width = 0.018, height = 0.011)) +
   theme_bw() +
   borders("world", xlim = range(tb_data$x), ylim = range(tb_data$y), colour = "white") +
@@ -56,3 +56,5 @@ plot <- ggplot(tb_data) +
 
 # Save Plot
 ggsave(paste0(field, ".png"), height = 10, width = 16)
+
+map_output
