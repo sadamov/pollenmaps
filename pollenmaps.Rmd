@@ -1,19 +1,19 @@
+
 ---
 title: "Plotting Maps in R"
 author: "Simon Adamov"
 date: "November 20, 2020"
 output: html_document
 ---
+## Setup
 
 This vignette shows some examples on how to plot pretty maps in R with the latest packages.
-Currently, it functions as a loose collection of open-source and third-party map material combined with various raster and shapefiles. 
-I would already like to mention that the most beautiful map was completely taken from here: https://timogrossenbacher.ch/2019/04/bivariate-maps-with-ggplot2-and-sf/
-Generally, all code chunks in this vignette need to run in tsa with the current R-version 3.5.2 (2020-11-20).
-
-*Quick Note about the setup:
-I access Tsa@CSCS via VSCode and remote-ssh. Then I run an interactive R sessions while working in the vignette. This required quite a few steps to set it up properly. 
-I plan to write a wiki page about vscode-R @ cscs at some point in the future. Feel free to ask me anything in the meantime.*
-In the chunk below I load a whole lot of packages, if the reader is only interested in a portion of the plot, feel free to only load a selection of packages as well.
+It should serve as a source of inspiration and sort of cookbook to create simple -> elaborate plots.
+The plot below has to be adjusted for each specific input field.
+Currently, it functions as a loose collection of open-source and third-party map material 
+combined with various raster and shapefiles. 
+I would already like to mention that the most beautiful map was completely taken from here: 
+https://timogrossenbacher.ch/2019/04/bivariate-maps-with-ggplot2-and-sf/
 
 ```{r setup, include=FALSE, echo = FALSE}
 knitr::opts_chunk$set(
@@ -49,8 +49,9 @@ library(ggmap)
 library(rmapshaper)
 library(mapview)
 library(rgdal)
-library(jsonlite)
-library(languageserver)
+# library(languageserver)
+# library(httpgd)
+# library(jsonlite)
 
 conflict_prefer("filter", "dplyr")
 conflict_prefer("select", "dplyr")
@@ -58,41 +59,62 @@ conflict_prefer("select", "dplyr")
 
 ## Data Import
 
-A typical output format in weather and climate science are netcdf files, hence we import one of this type right here, showing the median pollen concentrations modeled by Cosmo-1E.
-The code can of course be adjusted to plot any netcdf file.
+A typical output format in weather and climate science are netcdf files, hence we import one of this 
+type right here, showing the median pollen concentrations modeled by Cosmo-1E.
+The code can of course be adjusted to plot any netcdf file. The link below points to the CSCS 
+supercomuting center in Locarno (ETH).
 
-```{r}
-path_in <- paste0(here(), "/input/")
+Weather models often work with different projections. The code below is using lat/lon values
+in standard cartesian coordinates (already unrotated model output).
+
+```{r }
+#### SPECIFY YOUR FIELD AND FILE HERE ####
+field <- "ALNU"
+path_in <- paste0(here(), "/data/")
 path_out <- paste0(here(), "/output/")
-nc_path <- paste0("/scratch/sadamov/COSMO-1/c1_pollen_grid.nc")
+nc_path <- "/scratch/sadamov/wd/21_alnu_tuning_v3/21022500_c1e_tsa_alnu_tuning/lm_coarse/lfff01000000"
+variable  <- "ALNU"
+  system(paste0("fxfilter --force -s ", variable, " ", nc_path, " -o ", nc_path, "_filtered"))
+  system(paste0("fxconvert --force nc ", nc_path, "_filtered -o ", nc_path, "_filtered.nc"))
+nc_path <- paste0(nc_path, "_filtered.nc")
 ```
-
-Different packages will require different formats. The most recent development when it comes to polygon data in R is the package sf, a highly flexible framework not yet supported by all other packages.
-Hence we prepare the data in different shapes and forms. The output of many weather models is a gridded field. First, we display such grids. In a second step we extract data from model output for specific locations 
-(Swiss municipalities) to create even nicer plots specifically for the Swiss Domain.
 
 ```{r data, echo = TRUE}
 con <- nc_open(nc_path)
-layer <- ncvar_get(con, "POAC")[, , 80]
+layer <- ncvar_get(con, field)[, , 80]
 x <- ncvar_get(con, "lon_1")
 y <- ncvar_get(con, "lat_1")
 nc_close(con)
+```
 
+## Data Preperation
+
+Different packages will require different formats. The most recent development when it comes to 
+polygon data in R is the package sf, a highly flexible framework not yet supported by all other packages.
+Hence we prepare the data in different shapes and forms. The output of many weather models is a 
+gridded field. First, we display such grids. In a second step we extract data from model output 
+at specific locations (Swiss municipalities) to create even nicer plots specifically for the Swiss Domain.
+
+In the example below the lat/lon data is first converted into a raster, then aggregated and 
+converted into a polygon layer. UPDATE: There are more accurate ways to plot the model gridboxes with
+the actual shape. Especially for publications the approach below might not suffice: 
+https://stackoverflow.com/questions/43612903/how-to-properly-plot-projected-gridded-data-in-ggplot2
+If the reader has time, feel free to implement the methods described in the post above :)
+
+```{r wrangling, echo = TRUE}
+# Default raster object
 r <- raster(layer,
   ymn = 42.67, ymx = 49.52,
   xmn = 0.16, xmx = 16.75, crs = "+proj=longlat"
 )
-
+# A dataframe containing lat/long and values
 layer_latlong <- tibble(
   x = c(x),
   y = c(y),
   layer = c(layer)
 ) %>%
-  # lons west of 0 deg. need to be negative, hence make them negative here
+  # lons west of 0 deg. need to be negative, hence we make them negative here
   mutate(x = if_else(x > 180, x - 360, x))
-```
-
-```{r wrangling, echo = TRUE}
 # Convert the banana-shape into an equally spaced grid
 layer_raster <- rasterize(cbind(c(x), c(y)),
   r, layer_latlong$layer,
@@ -104,7 +126,6 @@ layer_raster_coarse <- aggregate(layer_raster, 6)
 # Polygons are usually faster to plot than raster images
 layer_poly <- rasterToPolygons(layer_raster_coarse)
 layer_poly_leaflet <- rasterToPolygons(layer_raster_vcoarse)
-
 # This is the oldschool way before sf was developped
 layer_poly@data$id <- seq_len(nrow(layer_poly@data))
 poly_fort <- tidy(layer_poly, data = layer_poly@data)
@@ -112,12 +133,13 @@ poly_fort <- tidy(layer_poly, data = layer_poly@data)
 poly_fort_mer <- merge(poly_fort, layer_poly@data,
   by.x = "id", by.y = "id"
 )
-
 # This is the modern way and works well with ggmap
 layer_poly_sf <- st_as_sf(layer_poly)
 ```
 
-## Grid Plots - netCDF
+## Plots
+
+### Plot Theme
 
 We first define a general map-them (from Timo Grossenbacher) to obtain a similar look and feel for all plots:
 
@@ -191,42 +213,29 @@ my_maptheme <- function(...) {
 }
 ```
 
-### Interactive
+### Simple and Fast Tile Plot
 
-The following creates an interactive map (html widget) where the background can be chosen from a large variety of map providers.
-If the polygon layer is fine or dense, plotting can take a long time or even crash. It's usually better to first aggregate the polygons.
+This is the fastest way to plot a netcdf file. Tiles are being drawn around each coordinate-pair.
+We are not looking at base-R plot function here, as ggplot allows for nicer plots and more
+customization (imho).
 
-```{r leaflet, echo = TRUE, fig.height = 5, fig.width = 7}
-pal <- colorNumeric("YlOrRd", layer_poly_leaflet$layer)
-mymap <- "https://stamen-tiles-{s}.a.ssl.fastly.net/terrain/{z}/{x}/{y}{r}.png"
-
-leaflet_map <- leaflet(layer_poly_leaflet) %>%
-  # More maps here: https://leaflet-extras.github.io/leaflet-providers/preview/
-  addTiles(urlTemplate = mymap) %>%
-  # Cosmo 1E Domain with extended boundaries
-  fitBounds(lat1 = 42.60, lat2 = 49.60, lng1 = 0.10, lng2 = 16.80) %>%
-  addPolygons(
-    weight = 0,
-    popup = as.character(round(values(layer_raster_vcoarse), 2)),
-    smoothFactor = 0.5, fillColor = ~ pal(layer), fillOpacity = 0.6
-  ) %>%
-  addLegend(pal = pal, values = ~ layer_poly_leaflet$layer, title = "Poaceae")
-
-leaflet_map
+```{r }
+ggplot(layer_latlong) +
+  geom_tile(aes(x, y, fill = layer, width = 0.018, height = 0.011)) +
+  borders("world", xlim = range(layer_latlong$x), ylim = range(layer_latlong$y), colour = "white") +
+  scale_fill_viridis_c() +
+  theme_bw() +
+  coord_fixed(xlim = range(layer_latlong$x), ylim = range(layer_latlong$y)) +
+  ggtitle("Simple and Fast Tile Plot") +
+  labs(fill = "Legendary") +
+  xlab("Longitude [East]") +
+  ylab("Latitude [North]") +
+  coord_quickmap(xlim = range(layer_latlong$x), ylim = range(layer_latlong$y)) 
 ```
 
-```{r eval = FALSE, include = FALSE}
-saveWidget(leaflet_map,
-  paste0(path_out, "leaflet_map.html"),
-  selfcontained = TRUE
-)
-# This requires phantomjs for static map screenshot
-mapshot(leaflet_map, file = paste0(path_out, "map_leaflet.png"))
-```
+### Polygon Plot - Open-Source
 
-### Static - Open-Source
-
-The following plots are fully open source.
+The following plots are fully open source. They draw polygons on top of a nice map in the background.
 
 ```{r efficient, echo = TRUE}
 upper_left <- c(51, 0)
@@ -235,7 +244,7 @@ lower_right <- c(40, 17.5)
 map <- openmap(upper_left, lower_right, type = "stamen-terrain")
 # The raster map is in a mercator projection and must be transformed
 map_proj <- openproj(map)
-raster_map <- autoplot(map_proj) +
+raster_map <- OpenStreetMap::autoplot.OpenStreetMap(map_proj) +
   my_maptheme() +
   geom_polygon(
     data = poly_fort_mer,
@@ -282,7 +291,7 @@ layer_latlong_zoom <- layer_latlong %>%
 alpha_low <- min(0.2 / (lower_right_zoom[2] - upper_left_zoom[2]), 0.2)
 alpha_high <- min(0.7 / (lower_right_zoom[2] - upper_left_zoom[2]), 0.7)
 
-gg_map <- autoplot(map_proj_zoom) +
+gg_map <- OpenStreetMap::autoplot.OpenStreetMap(map_proj_zoom) +
   my_maptheme() +
   geom_point(aes(x = x, y = y, col = layer, alpha = layer),
     stroke = 1, shape = 15, size = 3.3, data = layer_latlong_zoom
@@ -307,16 +316,17 @@ ggsave(paste0(path_out, "gg_map.png"), gg_map, dpi = "retina")
 
 ### Static - Google-API
 
-The next example requires a Google account to retrieve data from the Google API. This package is quite powerful and works well with the modern sf datatype.
+The next example requires a Google account to retrieve data from the Google API. 
+This package is quite powerful and works well with the modern sf datatype.
 
 ```{r ggmap, echo = TRUE}
 # ?register_google
-# Enter your key here - I will change mine soon ;-)
-register_google(key = "AIzaSyC-8Tyjbj1zc5fKdKZdbWaJk1H8CXdUIB8")
+# Enter your key here!!!!
+register_google(key = "")
 
 centroid <- c(45, 8)
 lat_zoom <- c(45, 48)
-long_zoom <- c(4, 11)
+long_zoom <- c(5, 15)
 
 ggmap_heat <- get_map(c(lon = centroid[2], lat = centroid[1]),
   zoom = 6, maptype = "terrain", color = "color", scale = "auto"
@@ -352,7 +362,7 @@ Changing the color gradient is easy. https://www.datanovia.com/en/blog/top-r-col
 ```{r}
 centroid <- c(45, 8)
 lat_zoom <- c(45, 48)
-long_zoom <- c(4, 11)
+long_zoom <- c(0, 15)
 
 ggmap_viridis <- get_map(c(lon = centroid[2], lat = centroid[1]),
   zoom = 6, maptype = "terrain", color = "color", scale = "auto"
@@ -509,13 +519,13 @@ map_timo <- ggplot(
   geom_sf(
     data = canton_geo,
     fill = "transparent",
-    color = "white",
+    color = "#ffffff",
     size = 0.5
   ) +
   # draw lakes in light blue
   geom_sf(
     data = lake_geo,
-    fill = "#D6F1FF",
+    fill = "#e4e6db6e",
     color = "transparent"
   ) +
   # add titles
@@ -533,6 +543,38 @@ map_timo
 
 ```{r eval = FALSE, include = FALSE}
 ggsave(paste0(path_out, "map_timo.png"), map_timo, dpi = "retina")
+```
+### Interactive
+
+The following creates an interactive map (html widget) where the background can be chosen from a large variety of map providers.
+If the polygon layer is fine or dense, plotting can take a long time or even crash. It's usually better to first aggregate the polygons.
+
+```{r leaflet, echo = TRUE, fig.height = 5, fig.width = 7}
+pal <- colorNumeric("YlOrRd", layer_poly_leaflet$layer)
+mymap <- "https://stamen-tiles-{s}.a.ssl.fastly.net/terrain/{z}/{x}/{y}{r}.png"
+
+leaflet_map <- leaflet(layer_poly_leaflet) %>%
+  # More maps here: https://leaflet-extras.github.io/leaflet-providers/preview/
+  addTiles(urlTemplate = mymap) %>%
+  # Cosmo 1E Domain with extended boundaries
+  fitBounds(lat1 = 42.60, lat2 = 49.60, lng1 = 0.10, lng2 = 16.80) %>%
+  addPolygons(
+    weight = 0,
+    popup = as.character(round(values(layer_raster_vcoarse), 2)),
+    smoothFactor = 0.5, fillColor = ~ pal(layer), fillOpacity = 0.6
+  ) %>%
+  addLegend(pal = pal, values = ~ layer_poly_leaflet$layer, title = "Poaceae")
+
+leaflet_map
+```
+
+```{r eval = FALSE, include = FALSE}
+saveWidget(leaflet_map,
+  paste0(path_out, "leaflet_map.html"),
+  selfcontained = TRUE
+)
+# This requires phantomjs for static map screenshot
+mapshot(leaflet_map, file = paste0(path_out, "map_leaflet.png"))
 ```
 
 And to conclude an interactive map with municipality level data.
