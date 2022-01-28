@@ -16,9 +16,9 @@ diagnostic_length  = 110
 /
 
 &GlobalResource
- dictionary           = "/oprusers/osm/opr.rh7.7/config/resources/dictionary_cosmo.txt"
- grib_definition_path = "/oprusers/osm/opr.rh7.7/config/resources/eccodes_definitions_cosmo",
-                        "/oprusers/osm/opr.rh7.7/config/resources/eccodes_definitions_vendor"
+ dictionary           = "/oprusers/osm/opr.rh7.9/config/resources/dictionary_cosmo.txt"
+ grib_definition_path = "/oprusers/osm/opr.rh7.9/config/resources/eccodes_definitions_cosmo",
+                        "/oprusers/osm/opr.rh7.9/config/resources/eccodes_definitions_vendor"
 location_list         = "./mylocation_list.txt"
 /
 
