@@ -16,7 +16,7 @@ species <- "CORY"
 variable <- ""
 model_name <- if_else(str_detect(model_version, "tuning"), "tuning", "model_version")
 
-
+# Support All Species
 limits <- case_when(
   species == "ALNU" & variable == "tune" ~ c(0, 2.5),
   species == "BETU" & variable == "tune" ~ c(0, 3),
